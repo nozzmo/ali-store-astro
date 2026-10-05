@@ -88,7 +88,7 @@ const ld = graph(organization(store, origin), website(store, origin), ...(crumbs
       <div class="head-actions">
         <a class="icon-btn" href="/?buscar=1#catalogo" aria-label="Buscar"><Icon name="search" /></a>
         {catalogOnly ? (
-          contactUrl && <a class="btn ghost head-contact" href={contactUrl} target="_blank" rel="noopener"><Icon name="chat" /> Consultar</a>
+          contactUrl && <a class="btn ghost head-contact" href={contactUrl} target="_blank" rel="noopener" aria-label="Consultar"><Icon name="chat" /><span class="label">Consultar</span></a>
         ) : (
           <a class="icon-btn" href="/carrito" aria-label="Carrito">
             <Icon name="cart" /><span class="badge" data-cart-count></span>
