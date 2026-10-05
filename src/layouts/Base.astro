@@ -1,0 +1,154 @@
+---
+import "@fontsource-variable/inter"
+import "../styles/global.css"
+import Icon from "../components/Icon.astro"
+import JsonLd from "../components/JsonLd.astro"
+import Breadcrumbs from "../components/Breadcrumbs.astro"
+import { apiUrl, publishableKey } from "../lib/ali"
+import { categoryPath } from "../lib/catalog"
+import { accent, absolute, siteOrigin, type Shell } from "../lib/site"
+import { breadcrumbs as crumbsLd, graph, organization, website } from "../lib/seo"
+
+interface Props {
+  shell: Shell
+  title: string
+  description?: string
+  /** Ruta canónica (sin query). */
+  path: string
+  ogImage?: string | null
+  ogType?: "website" | "product"
+  product?: { price?: string | null; currency?: string; available?: boolean }
+  jsonld?: unknown[]
+  crumbs?: { name: string; url: string }[]
+  noindex?: boolean
+}
+
+const { shell, title: rawTitle, description: rawDescription, path, ogImage, ogType = "website", product, jsonld = [], crumbs, noindex = false } = Astro.props
+const { store, categories, slugs, businessSlug, catalogOnly, contactUrl } = shell
+const origin = siteOrigin(Astro.url)
+const canonical = absolute(origin, path)
+const title = rawTitle === store.name ? store.name : `${rawTitle} · ${store.name}`
+const delivery = [store.fulfillment.delivery.enabled ? "envío a domicilio" : "", store.fulfillment.pickup.enabled ? "retiro en tienda" : ""].filter(Boolean).join(" y ")
+const fallbackDescription = catalogOnly
+  ? `Catálogo de ${store.name}: productos y precios${delivery ? `, con ${delivery}` : ""}. Consultá disponibilidad con la tienda.`
+  : `Comprá en línea en ${store.name}. Pagos seguros${delivery ? `, ${delivery}` : ""}.`
+const descriptionSource = (rawDescription || fallbackDescription).replace(/\s+/g, " ").trim()
+const description = descriptionSource.length > 160 ? `${descriptionSource.slice(0, 157).replace(/[\s,;:·.]+\S*$/, "")}…` : descriptionSource
+const og = ogImage || store.logo_url
+const { color, ink } = accent(store)
+const navCategories = categories.slice(0, 5)
+const current = (href: string) => (path === href ? "page" : undefined)
+const year = new Date().getFullYear()
+const ld = graph(organization(store, origin), website(store, origin), ...(crumbs ? [crumbsLd(crumbs, origin)] : []), ...jsonld)
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{title}</title>
+  <meta name="description" content={description} />
+  <link rel="canonical" href={canonical} />
+  <meta name="robots" content={noindex ? "noindex, nofollow" : "index, follow, max-image-preview:large"} />
+  <meta name="theme-color" content="#ffffff" />
+  {store.logo_url ? <link rel="icon" href={store.logo_url} /> : <link rel="icon" href="/favicon.svg" type="image/svg+xml" />}
+  <link rel="sitemap" href="/sitemap.xml" />
+  <link rel="alternate" type="text/plain" href="/llms.txt" title="Resumen para asistentes de IA" />
+  <link rel="service-desc" href={`${apiUrl()}/openapi.json`} type="application/json" />
+  <meta property="og:type" content={ogType} />
+  <meta property="og:site_name" content={store.name} />
+  <meta property="og:locale" content="es_LA" />
+  <meta property="og:title" content={title} />
+  <meta property="og:description" content={description} />
+  <meta property="og:url" content={canonical} />
+  {og && <meta property="og:image" content={og} />}
+  {product?.price && <meta property="product:price:amount" content={product.price} />}
+  {product?.price && <meta property="product:price:currency" content={product.currency ?? store.currency} />}
+  {product && <meta property="product:availability" content={product.available ? "in stock" : "out of stock"} />}
+  <meta name="twitter:card" content={og ? "summary_large_image" : "summary"} />
+  <JsonLd data={ld} />
+  {/* :root:root gana a global.css aunque el bundle se cargue después. */}
+  <style set:html={`:root:root{--accent:${color};--accent-ink:${ink}}`}></style>
+  <slot name="head" />
+</head>
+<body data-ali-business={businessSlug} data-catalog-only={catalogOnly ? "true" : undefined} data-ali-api={apiUrl()} data-ali-pk={publishableKey()} data-currency={store.currency}>
+  <a class="skip" href="#main">Saltar al contenido</a>
+  <header class="site-header">
+    <div class="wrap bar">
+      <a class="brand" href="/" aria-label={`${store.name}, inicio`}>
+        {store.logo_url ? <img src={store.logo_url} alt={store.name} height="40" /> : <span>{store.name}</span>}
+      </a>
+      <nav class="nav" aria-label="Principal">
+        <a href="/" aria-current={current("/")}>Catálogo</a>
+        {navCategories.map((c) => {
+          const href = categoryPath(slugs.get(c.id)!)
+          return <a href={href} aria-current={current(href)}>{c.name}</a>
+        })}
+      </nav>
+      <div class="head-actions">
+        <a class="icon-btn" href="/?buscar=1#catalogo" aria-label="Buscar"><Icon name="search" /></a>
+        {catalogOnly ? (
+          contactUrl && <a class="btn ghost head-contact" href={contactUrl} target="_blank" rel="noopener"><Icon name="chat" /> Consultar</a>
+        ) : (
+          <a class="icon-btn" href="/carrito" aria-label="Carrito">
+            <Icon name="cart" /><span class="badge" data-cart-count></span>
+          </a>
+        )}
+        <details class="mnav">
+          <summary class="icon-btn menu-toggle" aria-label="Abrir menú"><span class="i-open"><Icon name="menu" /></span><span class="i-close"><Icon name="close" /></span></summary>
+          <nav class="mobile-nav" aria-label="Menú móvil">
+            <a href="/">Todo el catálogo</a>
+            {categories.map((c) => <a href={categoryPath(slugs.get(c.id)!)}>{c.name}</a>)}
+            {catalogOnly ? (contactUrl && <a href={contactUrl} target="_blank" rel="noopener">Consultar</a>) : <a href="/carrito">Carrito</a>}
+          </nav>
+        </details>
+      </div>
+    </div>
+  </header>
+  {crumbs && <Breadcrumbs items={crumbs} />}
+  <main id="main">
+    <slot />
+  </main>
+  <footer class="site-footer">
+    <div class="wrap">
+      <div class="foot-grid">
+        <div>
+          <span class="foot-brand">{store.name}</span>
+          {store.fulfillment.pickup.enabled && store.fulfillment.pickup.address && <p>Retiro en tienda: {store.fulfillment.pickup.address}</p>}
+          {!catalogOnly && store.fulfillment.delivery.enabled && <p>Envío a domicilio: el costo se calcula con tu dirección antes de pagar.</p>}
+        </div>
+        {categories.length > 0 && (
+          <div>
+            <h2>Categorías</h2>
+            <ul>{categories.map((c) => <li><a href={categoryPath(slugs.get(c.id)!)}>{c.name}</a></li>)}</ul>
+          </div>
+        )}
+        <div>
+          <h2>Tienda</h2>
+          <ul>
+            <li><a href="/">Catálogo completo</a></li>
+            {catalogOnly ? (contactUrl && <li><a href={contactUrl} target="_blank" rel="noopener">Consultar</a></li>) : <li><a href="/carrito">Tu carrito</a></li>}
+          </ul>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>© {year} {store.name}</span>
+        <span>{catalogOnly ? "Catálogo en línea con Ali" : "Pagos y pedidos procesados con Ali"}</span>
+      </div>
+    </div>
+  </footer>
+  {!catalogOnly && <div class="toast" role="status" aria-live="polite" data-toast><span data-toast-text></span><a href="/carrito">Ver carrito</a></div>}
+  <script is:inline>
+    try { var n = JSON.parse(localStorage.getItem("ali.cart.count") || "0"); document.querySelectorAll("[data-cart-count]").forEach(function (e) { e.textContent = n || ""; e.dataset.count = n }) } catch (e) {}
+  </script>
+  <script is:inline>
+    (function () {
+      var d = document.querySelector("details.mnav"); if (!d) return
+      var s = d.querySelector("summary")
+      d.addEventListener("toggle", function () { s.setAttribute("aria-label", d.open ? "Cerrar menú" : "Abrir menú") })
+      document.addEventListener("click", function (e) { if (d.open && !d.contains(e.target)) d.open = false })
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape" && d.open) { d.open = false; s.focus() } })
+    })()
+  </script>
+</body>
+</html>

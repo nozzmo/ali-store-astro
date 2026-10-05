@@ -1,0 +1,26 @@
+---
+// Producto pausado, sin publicar o borrado: Ali no lo devuelve. 404 con salida al catálogo.
+import Base from "../layouts/Base.astro"
+import Icon from "../components/Icon.astro"
+import { categoryPath } from "../lib/catalog"
+import { guard, loadShell } from "../lib/site"
+
+Astro.response.status = 404
+Astro.response.headers.set("Cache-Control", "public, max-age=0, must-revalidate")
+const shell = await guard(Astro, () => loadShell(Astro))
+if (shell instanceof Response) return shell
+const { categories, slugs } = shell
+---
+<Base shell={shell} title="Producto no disponible" path={Astro.url.pathname} noindex>
+  <section><div class="wrap narrow center">
+    <p class="eyebrow">No disponible</p>
+    <h1>Este producto no está disponible</h1>
+    <p class="lead">La tienda lo pausó o ya no lo vende. Mirá el resto del catálogo: seguro encontrás algo parecido.</p>
+    <div class="actions" style="justify-content:center"><a class="btn" href="/">Ver el catálogo <Icon name="arrow" /></a></div>
+    {categories.length > 0 && (
+      <nav class="chips" aria-label="Categorías" style="justify-content:center;flex-wrap:wrap;margin-top:28px">
+        {categories.map((c) => <a class="chip" href={categoryPath(slugs.get(c.id)!)}>{c.name}</a>)}
+      </nav>
+    )}
+  </div></section>
+</Base>

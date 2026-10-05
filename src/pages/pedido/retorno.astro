@@ -1,0 +1,22 @@
+---
+// Vuelta desde la página de pago: buscamos el último pedido de este navegador.
+import Base from "../../layouts/Base.astro"
+import { noStore } from "../../lib/http"
+import { guard, loadShell } from "../../lib/site"
+
+const shell = await guard(Astro, () => loadShell(Astro))
+if (shell instanceof Response) return shell
+noStore(Astro)
+---
+<Base shell={shell} title="Volviendo a tu pedido" path="/pedido/retorno" noindex>
+  <section><div class="wrap narrow center">
+    <p class="lead" data-status style="margin-inline:auto">Buscando tu pedido…</p>
+    <div class="actions" style="justify-content:center"><a class="btn ghost" href="/">Volver a la tienda</a></div>
+  </div></section>
+</Base>
+<script>
+  import { lastOrder } from "../../scripts/store"
+  const id = lastOrder()
+  if (id) location.replace(`/pedido/${id}`)
+  else document.querySelector("[data-status]")!.textContent = "No encontramos un pedido reciente en este navegador. Revisá el correo de confirmación."
+</script>

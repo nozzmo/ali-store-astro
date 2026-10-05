@@ -1,0 +1,108 @@
+---
+import Base from "../../layouts/Base.astro"
+import Icon from "../../components/Icon.astro"
+import { noStore } from "../../lib/http"
+import { guard, loadShell } from "../../lib/site"
+
+const id = (Astro.params.id ?? "").toLowerCase()
+if (!/^[0-9a-f-]{36}$/.test(id)) return Astro.rewrite("/404")
+const shell = await guard(Astro, () => loadShell(Astro))
+if (shell instanceof Response) return shell
+noStore(Astro)
+// Número corto legible, el mismo que usa Ali (primeros 6 caracteres del id, sin guiones).
+const number = id.replace(/-/g, "").slice(0, 6).toUpperCase()
+---
+<Base shell={shell} title={`Pedido #${number}`} path={`/pedido/${id}`} noindex>
+  <section class="tight">
+    <div class="wrap narrow" data-order-app data-order-id={id}>
+      <p class="eyebrow">Tu pedido</p>
+      <div class="order-head">
+        <h1>Pedido #{number}</h1>
+        <span class="pill wait" data-status hidden></span>
+      </div>
+      <p class="lead" data-status-help style="margin-top:12px">Consultando el estado de tu pedido…</p>
+
+      <div class="notice" data-cash hidden><Icon name="info" /><span data-cash-text></span></div>
+
+      <div class="order-card" data-detail hidden style="margin-top:28px">
+        <h2>Detalle</h2>
+        <div class="summary" style="background:none;padding:0">
+          <div class="lines" data-lines></div>
+          <div data-totals></div>
+        </div>
+      </div>
+      <div class="order-card" data-fulfillment hidden style="margin-top:16px">
+        <h2>Entrega</h2>
+        <p data-fulfillment-text></p>
+      </div>
+
+      <p class="notice warn" data-error hidden role="alert"></p>
+      <div class="actions">
+        <a class="btn" href="/">Seguir comprando</a>
+        <a class="btn ghost" data-chat hidden rel="noopener" target="_blank"><Icon name="chat" /> Hablar con la tienda</a>
+      </div>
+      <p class="muted" style="margin-top:24px;font-size:.86rem">Guardá esta página para revisar tu pedido más tarde desde este mismo navegador.</p>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { api, esc, forgetCart, orderToken, problemMessage, type Problem } from "../../scripts/store"
+  import { money, orderStatus } from "../../lib/format"
+
+  interface OrderLine { name: string; amount: string; currency: string; quantity: number; kind: string; total_display?: string }
+  interface Order {
+    id: string; number: string; status: string; lines: OrderLine[]
+    totals: { subtotal: string; shipping: string; tax: string; total: string; currency: string }
+    fulfillment: { mode?: string; scheduled_date?: string; time_slot_start?: string; time_slot_end?: string; named_slot?: string; instructions?: string } | null
+    cash_instructions: string | null; chat_url: string | null
+  }
+
+  const app = document.querySelector<HTMLElement>("[data-order-app]")!
+  const id = app.dataset.orderId!
+  const $ = <T extends HTMLElement = HTMLElement>(s: string) => app.querySelector<T>(s)!
+
+  async function load() {
+    const token = orderToken(id)
+    if (!token) {
+      $("[data-status-help]").textContent = "Para ver el detalle, abrí este enlace desde el mismo navegador donde hiciste la compra. También te llega la confirmación por correo."
+      return
+    }
+    try {
+      const o = await api<Order>(`/orders/${id}`, { headers: { "Ali-Order-Token": token } })
+      forgetCart()
+      const s = orderStatus(o.status)
+      const pill = $("[data-status]")
+      pill.textContent = s.label
+      pill.className = `pill ${s.tone}`
+      pill.hidden = false
+      $("[data-status-help]").textContent = s.help
+      if (o.cash_instructions) { $("[data-cash-text]").textContent = o.cash_instructions; $("[data-cash]").hidden = false }
+
+      const cur = o.totals.currency
+      $("[data-lines]").innerHTML = o.lines.filter((l) => l.kind === "product").map((l) => `
+        <div class="row" style="padding:4px 0"><span>${l.quantity} × ${esc(l.name)}</span><span style="white-space:nowrap">${l.total_display ? esc(l.total_display) : `${esc(money(l.amount, l.currency))} c/u`}</span></div>`).join("")
+      $("[data-totals]").innerHTML = [
+        `<div class="row"><span>Subtotal</span><span>${esc(money(o.totals.subtotal, cur))}</span></div>`,
+        Number(o.totals.shipping) > 0 ? `<div class="row"><span>Envío</span><span>${esc(money(o.totals.shipping, cur))}</span></div>` : "",
+        Number(o.totals.tax) > 0 ? `<div class="row"><span>Impuestos</span><span>${esc(money(o.totals.tax, cur))}</span></div>` : "",
+        `<div class="row total"><span>Total</span><span>${esc(money(o.totals.total, cur))}</span></div>`,
+      ].join("")
+      $("[data-detail]").hidden = false
+
+      const f = o.fulfillment
+      if (f) {
+        const when = [f.scheduled_date, f.named_slot || (f.time_slot_start && f.time_slot_end ? `${f.time_slot_start.slice(0, 5)}–${f.time_slot_end.slice(0, 5)}` : "")].filter(Boolean).join(" · ")
+        const shipped = f.mode === "shipping" || f.mode === "delivery"
+        $("[data-fulfillment-text]").textContent = [shipped ? "Envío a domicilio" : f.mode === "pickup" ? "Retiro en tienda" : "", when, f.instructions].filter(Boolean).join(". ") || "La tienda te va a contactar para coordinar la entrega."
+        $("[data-fulfillment]").hidden = false
+      }
+      if (o.chat_url) { const chat = $<HTMLAnchorElement>("[data-chat]"); chat.href = o.chat_url; chat.hidden = false }
+    } catch (error) {
+      const problem = error as Problem
+      $("[data-status-help]").textContent = problem.status === 404 ? "No encontramos este pedido desde este navegador. Revisá el correo de confirmación." : ""
+      if (problem.status !== 404) { $("[data-error]").textContent = problemMessage(problem); $("[data-error]").hidden = false }
+    }
+  }
+  load()
+</script>

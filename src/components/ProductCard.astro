@@ -1,0 +1,28 @@
+---
+import Icon from "./Icon.astro"
+import { available, productPath, unpriced } from "../lib/catalog"
+import type { Product } from "../lib/types"
+interface Props { product: Product; category?: string; eager?: boolean; headingLevel?: 2 | 3 }
+const { product: p, category, eager = false, headingLevel = 3 } = Astro.props
+const Heading = `h${headingLevel}`
+const img = p.images[0]
+const ask = unpriced(p)
+const out = !ask && !available(p)
+const options = p.variants.length > 1 ? `${p.variants.length} opciones` : null
+---
+<a class:list={["card", { out }]} href={productPath(p)} data-product-card>
+  <div class:list={["ph", { empty: !img }]}>
+    {img ? (
+      <img src={img.url} width={img.width ?? 800} height={img.height ?? 1000} alt={img.alt || p.name}
+        loading={eager ? "eager" : "lazy"} decoding="async" fetchpriority={eager ? "high" : undefined} />
+    ) : <Icon name="photo" />}
+    {out && <span class="tag">Agotado</span>}
+    {ask && <span class="tag">Consultar</span>}
+  </div>
+  <div class="body">
+    {category && <span class="cat">{category}</span>}
+    <Heading>{p.name}</Heading>
+    {p.price_label && <span class="price">{p.price_ranged && <small>Desde</small>}{p.price_label}</span>}
+    {options && <span class="variants">{options}</span>}
+  </div>
+</a>

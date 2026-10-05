@@ -1,0 +1,138 @@
+---
+// Búsqueda + filtros + categorías + grilla + paginación. Funciona sin JavaScript
+// (formulario GET y enlaces); con JS los filtros se aplican solos y «Ver más»
+// agrega la página siguiente sin recargar.
+import Icon from "./Icon.astro"
+import ProductCard from "./ProductCard.astro"
+import { PAGE_SIZE, SORTS, applyFilters, categoryPath, filterQuery, priceSteps, type Filters } from "../lib/catalog"
+import { money } from "../lib/format"
+import type { Category, Product } from "../lib/types"
+
+interface Props {
+  products: Product[]
+  categories: Category[]
+  slugs: Map<string, string>
+  filters: Filters
+  basePath: string
+  currency: string
+  currentCategoryId?: string
+  showCategory?: boolean
+}
+const { products, categories, slugs, filters, basePath, currency, currentCategoryId, showCategory = true } = Astro.props
+const names = new Map(categories.map((c) => [c.id, c.name]))
+const { items, total, page, pages } = applyFilters(products, filters, names)
+const steps = priceSteps(products)
+const filtered = Boolean(filters.q || filters.max || filters.available)
+const keep = { ...filters, page: 1 }
+const pageHref = (n: number) => `${basePath}${filterQuery(keep, n)}`
+const window = Array.from({ length: pages }, (_, i) => i + 1).filter((n) => n === 1 || n === pages || Math.abs(n - page) <= 1)
+const count = total === 1 ? "1 producto" : `${total} productos`
+---
+<div class="catalog" id="catalogo" data-catalog>
+  <div class="wrap">
+    <form class="catalog-tools" role="search" aria-label="Buscar en el catálogo" action={basePath} method="get" data-filters>
+      <label class="catalog-search">Buscar
+        <span class="search-field"><Icon name="search" /><input type="search" name="q" value={filters.q} placeholder="Buscá por nombre, tipo o talla…" autocomplete="off" enterkeyhint="search" /></span>
+      </label>
+      {steps.length > 0 ? (
+        <label>Precio
+          <select name="hasta">
+            <option value="">Cualquiera</option>
+            {steps.map((n) => <option value={n} selected={filters.max === n}>Hasta {money(n, currency).replace(/\.00$/, "")}</option>)}
+            {filters.max && !steps.includes(filters.max) && <option value={filters.max} selected>Hasta {money(filters.max, currency)}</option>}
+          </select>
+        </label>
+      ) : <span></span>}
+      <label>Ordenar por
+        <select name="orden">{SORTS.map((s) => <option value={s.value} selected={filters.sort === s.value}>{s.label}</option>)}</select>
+      </label>
+      <div class="catalog-status">
+        <span role="status" aria-live="polite" data-result-count>{filters.q ? `${count} para «${filters.q}»` : count}</span>
+        <div class="catalog-status-actions">
+          <label class="filter-check"><input type="checkbox" name="disponibles" value="1" checked={filters.available} /> Solo disponibles</label>
+          {filtered && <a class="reset-filters" href={basePath}>Limpiar filtros</a>}
+          <noscript><button class="btn ghost" type="submit">Aplicar</button></noscript>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  {categories.length > 0 && (
+    <div class="chips-bar">
+      <nav class="chips wrap" aria-label="Categorías">
+        <a class="chip" href={`/${filterQuery(keep)}`} aria-current={currentCategoryId ? undefined : "page"}>Todo</a>
+        {categories.map((c) => <a class="chip" href={`${categoryPath(slugs.get(c.id)!)}${filterQuery(keep)}`} aria-current={currentCategoryId === c.id ? "page" : undefined}>{c.name}</a>)}
+      </nav>
+    </div>
+  )}
+
+  <div class="wrap catalog-body">
+    {items.length > 0 ? (
+      <div class="grid" data-grid>
+        {items.map((p, i) => <ProductCard product={p} category={showCategory ? names.get(p.category_id ?? "") : undefined} eager={page === 1 && i < 4} />)}
+      </div>
+    ) : (
+      <div class="catalog-empty">
+        <h2>{products.length === 0 ? "Todavía no hay productos publicados" : "No encontramos productos con esos filtros"}</h2>
+        <p class="muted">{products.length === 0 ? "Volvé pronto: la tienda está cargando su catálogo." : "Probá con otra palabra o quitá algún filtro."}</p>
+        {filtered && <a class="btn ghost" href={basePath}>Ver todo</a>}
+      </div>
+    )}
+
+    {pages > 1 && (
+      <nav class="pager" aria-label="Paginación" data-pager>
+        {page < pages && <a class="btn ghost" href={pageHref(page + 1)} rel="next" data-more>Ver más productos</a>}
+        <div class="pager-pages">
+          {window.map((n, i) => <>
+            {i > 0 && n - window[i - 1] > 1 && <span aria-hidden="true">…</span>}
+            {n === page ? <span aria-current="page">{n}</span> : <a href={pageHref(n)} rel={n === page - 1 ? "prev" : n === page + 1 ? "next" : undefined}>{n}</a>}
+          </>)}
+        </div>
+        <span class="pager-count" data-pager-count>Mostrando {Math.min(page * PAGE_SIZE, total)} de {total}</span>
+      </nav>
+    )}
+  </div>
+</div>
+
+<script>
+  // Mejora progresiva: aplicar filtros sin botón y cargar más sin recargar.
+  document.querySelectorAll<HTMLElement>("[data-catalog]").forEach((root) => {
+    const form = root.querySelector<HTMLFormElement>("[data-filters]")!
+    const search = form.querySelector<HTMLInputElement>('input[name="q"]')!
+    const submit = () => {
+      const data = new FormData(form)
+      const params = new URLSearchParams()
+      for (const [key, value] of data) if (String(value).trim()) params.set(key, String(value).trim())
+      const query = params.toString()
+      location.assign(`${form.action}${query ? `?${query}` : ""}#catalogo`)
+    }
+    let timer: number | undefined
+    form.addEventListener("change", (event) => { if (event.target !== search) submit() })
+    form.addEventListener("submit", (event) => { event.preventDefault(); submit() })
+    search.addEventListener("input", () => { clearTimeout(timer); timer = window.setTimeout(submit, 700) })
+    if (new URLSearchParams(location.search).get("buscar") === "1") search.focus()
+    if (location.hash === "#catalogo" && search.value) { search.focus(); search.setSelectionRange(search.value.length, search.value.length) }
+
+    // «Ver más productos»: trae la página siguiente y agrega sus tarjetas.
+    const pager = root.querySelector<HTMLElement>("[data-pager]")
+    pager?.addEventListener("click", async (event) => {
+      const link = (event.target as HTMLElement).closest<HTMLAnchorElement>("a[data-more]")
+      if (!link) return
+      event.preventDefault()
+      link.classList.add("loading")
+      try {
+        const html = await (await fetch(link.href, { headers: { Accept: "text/html" } })).text()
+        const doc = new DOMParser().parseFromString(html, "text/html")
+        const grid = root.querySelector("[data-grid]")
+        doc.querySelectorAll("[data-grid] > [data-product-card]").forEach((card) => grid?.append(document.importNode(card, true)))
+        const next = doc.querySelector<HTMLElement>("[data-pager]")
+        if (next) pager.replaceChildren(...[...next.childNodes].map((n) => document.importNode(n, true)))
+        else pager.remove()
+      } catch {
+        location.assign(link.href)
+      } finally {
+        link.classList.remove("loading")
+      }
+    })
+  })
+</script>

@@ -1,0 +1,91 @@
+---
+import Base from "../layouts/Base.astro"
+import Icon from "../components/Icon.astro"
+import CatalogView from "../components/CatalogView.astro"
+import { getCatalog } from "../lib/ali"
+import { available, categoryPath, productPath, readFilters } from "../lib/catalog"
+import { guard, loadShell, siteOrigin } from "../lib/site"
+import { itemList } from "../lib/seo"
+import { cacheCatalog } from "../lib/http"
+
+const data = await guard(Astro, async () => {
+  const shell = await loadShell(Astro)
+  const { products } = await getCatalog(shell.ali)
+  return { shell, products }
+})
+if (data instanceof Response) return data
+const { shell, products } = data
+const { store, categories, slugs, catalogOnly } = shell
+cacheCatalog(Astro)
+
+const filters = readFilters(Astro.url)
+const filtering = Boolean(filters.q || filters.max || filters.available || filters.sort !== "relevancia" || filters.page > 1)
+const featured = products.filter((p) => available(p) && p.images.length > 0).slice(0, 3)
+const counts = new Map<string, number>()
+for (const p of products) if (p.category_id) counts.set(p.category_id, (counts.get(p.category_id) ?? 0) + 1)
+const tiles = categories.filter((c) => counts.get(c.id)).map((c) => ({
+  ...c,
+  photo: c.image_url ?? products.find((p) => p.category_id === c.id && p.images.length)?.images[0]?.url ?? null,
+}))
+const { pickup, delivery } = store.fulfillment
+const origin = siteOrigin(Astro.url)
+---
+<Base shell={shell} title={store.name} path="/" noindex={filtering}
+  ogImage={featured[0]?.images[0]?.url}
+  jsonld={[itemList(`Catálogo de ${store.name}`, products.slice(0, 50), origin)]}>
+  {!filtering && (
+    <section class:list={["hero", { simple: featured.length < 3 }]}>
+      <div class="wrap hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">{catalogOnly ? "Catálogo" : "Tienda en línea"}</p>
+          <h1>{store.name}</h1>
+          {catalogOnly ? (
+            <p class="lead">Mirá el catálogo y consultanos disponibilidad, precios y entrega antes de pedir.</p>
+          ) : (
+            <p class="lead">Elegí tus productos, pagá en línea de forma segura{delivery.enabled && pickup.enabled ? " y recibilo en tu casa o retiralo en la tienda." : delivery.enabled ? " y recibilo en tu casa." : " y retiralo en la tienda."}</p>
+          )}
+          <div class="actions"><a class="btn" href="#catalogo">Ver productos <Icon name="arrow" /></a></div>
+          <div class="hero-meta">
+            {delivery.enabled && <span><Icon name="truck" /> Envío a domicilio</span>}
+            {pickup.enabled && <span><Icon name="store" /> Retiro en tienda</span>}
+            {!catalogOnly && <span><Icon name="lock" /> Pago seguro</span>}
+          </div>
+        </div>
+        {featured.length >= 3 && (
+          <div class="mosaic" aria-label="Productos destacados">
+            {featured.map((p, i) => (
+              <a href={productPath(p)} aria-label={p.name}>
+                <img src={p.images[0].url} alt={p.images[0].alt || p.name} width={p.images[0].width ?? 800} height={p.images[0].height ?? 1000}
+                  loading={i === 0 ? "eager" : "lazy"} fetchpriority={i === 0 ? "high" : undefined} decoding="async" />
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  )}
+
+  {!filtering && tiles.length > 1 && (
+    <section class="tight">
+      <div class="wrap">
+        <div class="section-head"><h2>Categorías</h2></div>
+        <div class="cat-tiles">
+          {tiles.map((c) => (
+            <a class="cat-tile" href={categoryPath(slugs.get(c.id)!)}>
+              <span class:list={["ph", { empty: !c.photo }]}>{c.photo ? <img src={c.photo} alt="" loading="lazy" decoding="async" /> : <Icon name="photo" />}</span>
+              <b>{c.name}</b>
+              <span class="count">{counts.get(c.id)} {counts.get(c.id) === 1 ? "producto" : "productos"} <Icon name="arrow" /></span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+  )}
+
+  <section class="tight" style="padding-bottom:0">
+    <div class="wrap">
+      {filtering ? <h1 style="font-size:clamp(1.8rem,3vw,2.6rem)">Catálogo</h1> : <div class="section-head" style="margin-bottom:0"><h2>Todos los productos</h2></div>}
+    </div>
+  </section>
+  <CatalogView products={products} categories={categories} slugs={slugs} filters={filters} basePath="/" currency={store.currency} />
+</Base>

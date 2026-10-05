@@ -1,0 +1,12 @@
+# Deploy en Netlify. El adaptador de Astro se elige solo (NETLIFY=true al compilar).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+
+# El botón «Deploy to Netlify» le pide a quien instala sólo estas variables.
+[template.environment]
+  ALI_PUBLISHABLE_KEY = "Llave publicable de la Store API de Ali (ali_pk_test_… o ali_pk_live_…)"
+  ALI_SECRET_KEY = "Llave secreta de la Store API (ali_sk_…). Sólo la usa el servidor; recomendada"

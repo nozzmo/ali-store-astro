@@ -1,0 +1,45 @@
+---
+// Lo que ve el comprador cuando Ali no responde: nunca un 500 en blanco.
+// 429 (mucho tráfico) y caídas → 503 con Retry-After; llave mala o faltante → aviso para quien instala.
+import "@fontsource-variable/inter"
+import "../styles/global.css"
+
+const failure = Astro.locals.aliFailure ?? { status: 503 }
+const misconfigured = failure.code === "not-configured" || failure.status === 401 || failure.status === 403
+const busy = failure.status === 429
+const retry = Math.min(Math.max(failure.retryAfter ?? 10, 5), 120)
+Astro.response.status = misconfigured ? 500 : 503
+if (!misconfigured) Astro.response.headers.set("Retry-After", String(retry))
+Astro.response.headers.set("Cache-Control", "no-store")
+---
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>{busy ? "Mucho tráfico" : misconfigured ? "Tienda sin configurar" : "Tienda no disponible"}</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  {!misconfigured && <meta http-equiv="refresh" content={String(retry)} />}
+</head>
+<body>
+  <main id="main">
+    <section><div class="wrap narrow center" style="padding-top:12vh">
+      {busy ? (<>
+        <p class="eyebrow">Un momento</p>
+        <h1>Hay mucho tráfico en este momento</h1>
+        <p class="lead">Estamos recibiendo muchas visitas. La página se vuelve a cargar sola en {retry} segundos.</p>
+      </>) : misconfigured ? (<>
+        <p class="eyebrow">Configuración</p>
+        <h1>La tienda todavía no está conectada a Ali</h1>
+        <p class="lead">Falta la llave de la Store API o no es válida. Revisá las variables ALI_PUBLISHABLE_KEY y ALI_SECRET_KEY (ver README).</p>
+      </>) : (<>
+        <p class="eyebrow">Volvemos enseguida</p>
+        <h1>La tienda no está disponible por un momento</h1>
+        <p class="lead">No pudimos cargar el catálogo. Reintentamos solos en {retry} segundos.</p>
+      </>)}
+      <div class="actions" style="justify-content:center"><a class="btn" href={Astro.url.pathname === "/no-disponible" ? "/" : Astro.url.pathname + Astro.url.search}>Reintentar ahora</a></div>
+    </div></section>
+  </main>
+</body>
+</html>

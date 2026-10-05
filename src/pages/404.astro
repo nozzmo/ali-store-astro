@@ -1,0 +1,16 @@
+---
+import Base from "../layouts/Base.astro"
+import { guard, loadShell } from "../lib/site"
+
+Astro.response.status = 404
+const shell = await guard(Astro, () => loadShell(Astro))
+if (shell instanceof Response) return shell
+---
+<Base shell={shell} title="Página no encontrada" path="/404" noindex>
+  <section><div class="wrap narrow center">
+    <p class="eyebrow">Error 404</p>
+    <h1>No encontramos esta página</h1>
+    <p class="lead">Puede que el producto ya no esté publicado o que el enlace tenga un error.</p>
+    <div class="actions" style="justify-content:center"><a class="btn" href="/">Ver el catálogo</a>{!shell.catalogOnly && <a class="btn ghost" href="/carrito">Ir al carrito</a>}</div>
+  </div></section>
+</Base>

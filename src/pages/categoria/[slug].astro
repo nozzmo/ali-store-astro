@@ -1,0 +1,42 @@
+---
+import Base from "../../layouts/Base.astro"
+import CatalogView from "../../components/CatalogView.astro"
+import { getCatalog } from "../../lib/ali"
+import { categoryPath, readFilters } from "../../lib/catalog"
+import { cacheCatalog } from "../../lib/http"
+import { guard, loadShell, siteOrigin } from "../../lib/site"
+import { itemList } from "../../lib/seo"
+
+const data = await guard(Astro, async () => {
+  const shell = await loadShell(Astro)
+  const { products } = await getCatalog(shell.ali)
+  return { shell, products }
+})
+if (data instanceof Response) return data
+const { shell, products } = data
+const { store, categories, slugs } = shell
+
+const category = categories.find((c) => slugs.get(c.id) === Astro.params.slug)
+if (!category) return Astro.rewrite("/404")
+cacheCatalog(Astro)
+
+const path = categoryPath(slugs.get(category.id)!)
+const list = products.filter((p) => p.category_id === category.id)
+const filters = readFilters(Astro.url)
+const filtering = Boolean(filters.q || filters.max || filters.available || filters.sort !== "relevancia" || filters.page > 1)
+const origin = siteOrigin(Astro.url)
+const ogImage = list.find((p) => p.images.length)?.images[0]?.url
+---
+<Base shell={shell} title={category.name} path={path} noindex={filtering} ogImage={ogImage}
+  description={category.description ? `${category.description} ${list.length} productos en ${store.name}.` : `${category.name}: ${list.length} productos en ${store.name}.`}
+  crumbs={[{ name: "Inicio", url: "/" }, { name: category.name, url: path }]}
+  jsonld={[itemList(category.name, list, origin)]}>
+  <section class="page-intro">
+    <div class="wrap">
+      <p class="eyebrow">Categoría</p>
+      <h1>{category.name}</h1>
+      {category.description && <p class="lead">{category.description}</p>}
+    </div>
+  </section>
+  <CatalogView products={list} categories={categories} slugs={slugs} filters={filters} basePath={path} currency={store.currency} currentCategoryId={category.id} showCategory={false} />
+</Base>

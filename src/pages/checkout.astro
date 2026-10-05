@@ -1,0 +1,355 @@
+---
+import Base from "../layouts/Base.astro"
+import Icon from "../components/Icon.astro"
+import { noStore } from "../lib/http"
+import { guard, loadShell } from "../lib/site"
+
+const shell = await guard(Astro, () => loadShell(Astro))
+if (shell instanceof Response) return shell
+// Modo catálogo: no hay carrito ni checkout.
+if (shell.catalogOnly) return Astro.redirect("/", 302)
+noStore(Astro)
+const { store } = shell
+const { pickup, delivery } = store.fulfillment
+const both = pickup.enabled && delivery.enabled
+const onlyMode = !both ? (delivery.enabled ? "delivery" : "pickup") : null
+const methods = store.payment_methods
+---
+<Base shell={shell} title="Finalizar compra" path="/checkout" noindex>
+  <section class="tight">
+    <div class="wrap">
+      <h1>Finalizar compra</h1>
+      <p class="notice warn" data-cancelled hidden><Icon name="info" /><span>El pago no se completó. Tu carrito sigue guardado: revisá los datos e intentá de nuevo.</span></p>
+      {!store.checkout_enabled && <p class="notice warn"><Icon name="info" /><span>Esta tienda todavía no tiene un método de pago activo. Podés armar tu carrito, pero no completar el pedido.</span></p>}
+
+      <div class="two-col" data-checkout-app data-only-mode={onlyMode ?? ""} hidden>
+        <form data-form novalidate>
+          <div class="step">
+            <h2><span class="n">1</span> Tus datos</h2>
+            <div class="form-grid two">
+              <label class="field">Nombre<input type="text" name="first_name" autocomplete="given-name" required /></label>
+              <label class="field">Apellido<input type="text" name="last_name" autocomplete="family-name" required /></label>
+              <label class="field">Correo electrónico<input type="email" name="email" autocomplete="email" required /></label>
+              <label class="field">Teléfono<input type="tel" name="phone" autocomplete="tel" required /></label>
+            </div>
+          </div>
+
+          <div class="step">
+            <h2><span class="n">2</span> Entrega</h2>
+            {both && (
+              <div class="seg" role="radiogroup" aria-label="Forma de entrega">
+                <label><input type="radio" name="mode" value="pickup" checked /><span>Retiro en tienda</span><small>Sin costo de envío</small></label>
+                <label><input type="radio" name="mode" value="delivery" /><span>Envío a domicilio</span><small>Se cotiza con tu dirección</small></label>
+              </div>
+            )}
+            {onlyMode && <input type="hidden" name="mode" value={onlyMode} />}
+            {pickup.enabled && (
+              <p class="notice" data-pickup-note><Icon name="store" /><span>Retirás en: <strong>{pickup.address || "la tienda"}</strong>. Te avisamos cuando tu pedido esté listo.</span></p>
+            )}
+            {delivery.enabled && (
+              <div data-delivery hidden>
+                <label class="field">Dirección de entrega
+                  <textarea name="address" rows="2" autocomplete="street-address" placeholder="Calle, número, zona, ciudad y cualquier referencia"></textarea>
+                </label>
+                <div class="quote-row">
+                  <button class="btn ghost" type="button" data-quote>Calcular envío</button>
+                </div>
+                <div data-quote-result role="status" aria-live="polite"></div>
+              </div>
+            )}
+          </div>
+
+          <div class="step">
+            <h2><span class="n">3</span> Pago</h2>
+            {methods.length > 0 ? (
+              <div class="pay-opts">
+                {methods.map((m, i) => (
+                  <label><input type="radio" name="payment_method_id" value={m.id} checked={methods.some((x) => x.default) ? Boolean(m.default) : i === 0} /><span><b>{m.label}</b>{m.description && <small>{m.description}</small>}</span></label>
+                ))}
+              </div>
+            ) : <p class="muted">No hay métodos de pago disponibles.</p>}
+
+            <details class="extra" style="margin-top:16px">
+              <summary>Datos de facturación (opcional)</summary>
+              <div class="form-grid two">
+                <label class="field">NIT<input type="text" name="tax_id" autocomplete="off" placeholder="CF si no necesitás factura" /></label>
+                <label class="field">Nombre o razón social<input type="text" name="billing_name" autocomplete="organization" /></label>
+                <label class="field full">Correo para la factura<input type="email" name="billing_email" autocomplete="email" /></label>
+                <label class="field full">Dirección fiscal<input type="text" name="billing_address" /></label>
+              </div>
+            </details>
+            <label class="field" style="margin-top:16px"><span>Notas para la tienda <small>(opcional)</small></span><textarea name="notes" rows="2" placeholder="Horario preferido, referencias, regalo…"></textarea></label>
+          </div>
+        </form>
+
+        <aside>
+          <div class="summary" data-summary>
+            <h2>Tu pedido</h2>
+            <div class="lines" data-summary-lines></div>
+            <div class="row"><span>Subtotal</span><span data-subtotal>—</span></div>
+            <div class="row"><span>Envío</span><span data-shipping>—</span></div>
+            <div class="row total"><span>Total</span><span data-total>—</span></div>
+            <p class="notice warn" data-error hidden role="alert"></p>
+            <button class="btn block" type="button" data-pay style="margin-top:16px" disabled>Pagar</button>
+            <p class="note" data-pay-hint></p>
+            <p class="note"><Icon name="lock" /> El total lo calcula la tienda con precios y envío vigentes. Vas a pagar en una página segura.</p>
+          </div>
+        </aside>
+      </div>
+
+      <div class="paybar" data-paybar hidden>
+        <span><small>Total</small><b data-paybar-total>—</b></span>
+        <button class="btn" type="button" data-paybar-pay disabled>Pagar</button>
+      </div>
+
+      <div data-empty hidden class="catalog-empty" style="margin-top:24px">
+        <h2>Tu carrito está vacío</h2>
+        <p class="muted">Agregá productos para finalizar la compra.</p>
+        <a class="btn" href="/">Ver productos</a>
+      </div>
+      <div data-loading class="skeleton" style="height:420px;margin-top:24px"></div>
+    </div>
+  </section>
+</Base>
+
+<script>
+  import { checkout, esc, forgetCart, getCart, problemMessage, quoteShipping, rememberOrder, setFulfillment, type Cart, type Problem } from "../scripts/store"
+  import { BLOCKING_ISSUES, issueMessage, money } from "../lib/format"
+
+  const app = document.querySelector<HTMLElement>("[data-checkout-app]")!
+  const form = app.querySelector<HTMLFormElement>("[data-form]")!
+  const $ = <T extends HTMLElement = HTMLElement>(s: string) => document.querySelector<T>(s)
+  const payBtn = $<HTMLButtonElement>("[data-pay]")!
+  const errorEl = $("[data-error]")!
+  const hint = $("[data-pay-hint]")!
+  const summary = $("[data-summary]")!
+  const deliveryBox = $("[data-delivery]")
+  const pickupNote = $("[data-pickup-note]")
+  const quoteBtn = $<HTMLButtonElement>("[data-quote]")
+  const quoteResult = $("[data-quote-result]")
+  const address = form.querySelector<HTMLTextAreaElement>('textarea[name="address"]')
+  const photo = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="9" cy="10" r="1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" d="m4 17 5-4.5 3.5 3 3-2.5L20 17"/></svg>'
+
+  let cart: Cart | null = null
+  let quotedAddress: string | null = null
+  let busy = false
+
+  if (new URLSearchParams(location.search).get("pago") === "cancelado") $("[data-cancelled]")!.hidden = false
+
+  const mode = (): "pickup" | "delivery" => (form.querySelector<HTMLInputElement>('input[name="mode"]:checked') ?? form.querySelector<HTMLInputElement>('input[name="mode"][type="hidden"]'))?.value as "pickup" | "delivery" ?? "pickup"
+  const currentAddress = () => (address?.value ?? "").trim().replace(/\s+/g, " ")
+  const quoteReady = () => cart !== null && mode() === "delivery" && quotedAddress === currentAddress() && ["priced", "coordinate"].includes(cart.shipping_status)
+
+  function showError(text: string) {
+    errorEl.textContent = text
+    errorEl.hidden = !text
+    if (text && window.matchMedia("(max-width: 959px)").matches) errorEl.scrollIntoView({ behavior: "smooth", block: "center" })
+  }
+
+  // El resumen se dibuja SIEMPRE desde el último carrito que devolvió Ali:
+  // al cargar, al cambiar retiro/envío y después de cada cotización. Nunca se suma en el navegador.
+  function render() {
+    if (!cart) return
+    const c = cart
+    const cur = c.totals.currency
+    $("[data-summary-lines]")!.innerHTML = c.lines.map((l) => `
+      <div class="sline">
+        <span class="thumb">${l.image_url ? `<img src="${esc(l.image_url)}" alt="" loading="lazy">` : photo}<span class="qbadge">${l.quantity}</span></span>
+        <span><b>${esc(l.product_name)}</b><small>${l.variant_name && l.variant_name !== l.product_name ? `${esc(l.variant_name)} · ` : ""}${l.quantity} × ${esc(money(l.unit_price, l.currency))}</small></span>
+      </div>`).join("") + c.issues.map((i) => `<p class="notice warn" style="margin:0"><span>${esc(issueMessage(i, cur))}${BLOCKING_ISSUES.includes(i.code) ? ` <a href="/carrito">Quitalo en el carrito</a> para poder pagar.` : ""}</span></p>`).join("")
+    const unavailable = c.issues.some((i) => BLOCKING_ISSUES.includes(i.code))
+    $("[data-subtotal]")!.textContent = money(c.totals.subtotal, cur)
+
+    const shipping = $("[data-shipping]")!
+    if (mode() === "pickup") shipping.textContent = "Retiro sin costo"
+    else if (!quoteReady()) shipping.textContent = "Calculá el envío"
+    else if (c.shipping_status === "coordinate") shipping.textContent = "A coordinar con la tienda"
+    else shipping.textContent = money(c.totals.shipping, cur)
+
+    $("[data-total]")!.textContent = mode() === "delivery" && !quoteReady() ? `${money(c.totals.subtotal, cur)} + envío` : money(c.totals.total, cur)
+
+    const blocked = unavailable || c.lines.length === 0 || (mode() === "delivery" && !quoteReady()) || form.querySelectorAll('input[name="payment_method_id"]').length === 0
+    payBtn.disabled = blocked || busy
+    payBtn.textContent = blocked ? "Pagar" : `Pagar ${money(c.totals.total, cur)}`
+    // Barra fija en el celular: mismo total del servidor y el mismo botón.
+    $("[data-paybar]")!.hidden = false
+    $("[data-paybar-total]")!.textContent = $("[data-total]")!.textContent
+    const mobilePay = $<HTMLButtonElement>("[data-paybar-pay]")!
+    mobilePay.disabled = payBtn.disabled
+    mobilePay.textContent = blocked ? (mode() === "delivery" && !quoteReady() ? "Calculá el envío" : "Pagar") : "Pagar"
+    hint.textContent = c.lines.length === 0 ? "Tu carrito quedó vacío. Volvé al catálogo para elegir otros productos." : unavailable ? "Hay productos agotados o no disponibles en tu carrito." : mode() === "delivery" && !quoteReady() ? "Ingresá tu dirección y calculá el envío para ver el total." : ""
+  }
+
+  function syncModeUI() {
+    const delivery = mode() === "delivery"
+    if (deliveryBox) deliveryBox.hidden = !delivery
+    if (pickupNote) pickupNote.hidden = delivery
+  }
+
+  async function withSummary<T>(work: () => Promise<T>): Promise<T> {
+    summary.classList.add("updating")
+    try { return await work() } finally { summary.classList.remove("updating") }
+  }
+
+  let modeSeq = 0
+  async function changeMode() {
+    syncModeUI()
+    showError("")
+    quotedAddress = null
+    if (quoteResult) quoteResult.innerHTML = ""
+    const mine = ++modeSeq
+    try {
+      const updated = await withSummary(() => setFulfillment(mode()))
+      if (mine !== modeSeq) return // llegó tarde: ya hay otro cambio de modo en curso
+      cart = updated
+      render()
+      if (mode() === "delivery" && currentAddress()) await quote()
+    } catch (problem) {
+      showError(problemMessage(problem as Problem))
+    }
+  }
+
+  let quoting: Promise<void> | null = null
+  function quote(): Promise<void> {
+    if (quoting) return quoting
+    if (currentAddress() && currentAddress() === quotedAddress) return Promise.resolve()
+    quoting = runQuote().finally(() => { quoting = null })
+    return quoting
+  }
+
+  async function runQuote() {
+    const value = currentAddress()
+    if (!value) { quoteResult!.innerHTML = `<p class="notice warn">Escribí tu dirección para calcular el envío.</p>`; address?.focus(); return }
+    quoteBtn?.classList.add("loading")
+    showError("")
+    try {
+      const result = await withSummary(() => quoteShipping(value))
+      cart = result.cart
+      quotedAddress = value
+      const q = result.quote
+      // Ali a veces manda como nota su explicación interna («Precio fijo de respaldo», «A coordinar»): no es para el comprador.
+      const internal = ["precio fijo de respaldo", "a coordinar"]
+      const note = q.note && !internal.includes(q.note.trim().toLowerCase()) ? ` ${esc(q.note)}` : ""
+      quoteResult!.innerHTML =
+        q.status === "priced" ? `<p class="notice ok"><span>Envío a esa dirección: <strong>${esc(money(q.cost, cart.totals.currency))}</strong>.${note}</span></p>`
+        : q.status === "coordinate" ? `<p class="notice"><span>El costo del envío se coordina con la tienda después del pedido.${note}</span></p>`
+        : `<p class="notice warn"><span>La tienda no hace envíos a esa dirección.${note || " Probá con otra dirección o elegí retiro."}</span></p>`
+      render()
+    } catch (problem) {
+      quoteResult!.innerHTML = `<p class="notice warn">${esc(problemMessage(problem as Problem))}</p>`
+    } finally {
+      quoteBtn?.classList.remove("loading")
+    }
+  }
+
+  form.addEventListener("change", (event) => {
+    const target = event.target as HTMLInputElement
+    if (target.name === "mode") changeMode()
+  })
+  quoteBtn?.addEventListener("click", () => { quote() })
+  address?.addEventListener("input", () => { if (quotedAddress !== null && currentAddress() !== quotedAddress) { quoteResult!.innerHTML = `<p class="notice">Cambiaste la dirección: calculá el envío de nuevo.</p>` } render() })
+  address?.addEventListener("blur", () => { if (currentAddress() && currentAddress() !== quotedAddress) quote() })
+
+  // Reintentos del mismo pedido usan la misma Idempotency-Key: un doble clic no crea dos pedidos.
+  function idempotencyKey(payload: string) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("ali.idem") || "null")
+      if (saved && saved.payload === payload) return saved.key as string
+      const key = crypto.randomUUID()
+      sessionStorage.setItem("ali.idem", JSON.stringify({ payload, key }))
+      return key
+    } catch { return crypto.randomUUID() }
+  }
+
+  function markErrors(errors: { field: string; code: string }[] = []) {
+    form.querySelectorAll("[aria-invalid]").forEach((el) => el.removeAttribute("aria-invalid"))
+    const map: Record<string, string> = { "buyer.first_name": "first_name", "buyer.last_name": "last_name", "buyer.email": "email", "buyer.phone": "phone", "fulfillment.address": "address", "buyer.email.format": "email" }
+    let first: HTMLElement | null = null
+    for (const e of errors) {
+      const el = form.querySelector<HTMLElement>(`[name="${map[e.field] ?? e.field}"]`)
+      if (el) { el.setAttribute("aria-invalid", "true"); first ??= el }
+    }
+    first?.focus()
+  }
+
+  $("[data-paybar-pay]")!.addEventListener("click", () => payBtn.click())
+  payBtn.addEventListener("click", async () => {
+    showError("")
+    markErrors()
+    const invalid = [...form.querySelectorAll<HTMLInputElement>("input[required]")].filter((i) => !i.checkValidity())
+    if (invalid.length) {
+      invalid.forEach((i) => i.setAttribute("aria-invalid", "true"))
+      showError("Completá tus datos de contacto para seguir.")
+      invalid[0].focus()
+      return
+    }
+    if (!cart) return
+    const data = new FormData(form)
+    const text = (k: string) => String(data.get(k) ?? "").trim()
+    const payload = {
+      buyer: { first_name: text("first_name"), last_name: text("last_name"), email: text("email"), phone: text("phone") },
+      fulfillment: { mode: mode(), address: mode() === "delivery" ? currentAddress() : null },
+      billing: { tax_id: text("tax_id") || null, name: text("billing_name") || null, email: text("billing_email") || null, address: text("billing_address") || null },
+      payment_method_id: text("payment_method_id"),
+      notes: text("notes") || null,
+      // El origen real del sitio, sin forzar http ni https. Ali exige https (con llave test acepta https://localhost).
+      return_url: `${location.origin}/pedido/retorno`,
+      cancel_url: `${location.origin}/checkout?pago=cancelado`,
+    }
+    const body = JSON.stringify(payload)
+    busy = true
+    payBtn.classList.add("loading")
+    render()
+    try {
+      const result = await checkout(payload, idempotencyKey(body))
+      rememberOrder(result.order.id, result.order_token)
+      forgetCart()
+      sessionStorage.removeItem("ali.idem")
+      location.assign(result.checkout_url || `/pedido/${result.order.id}`)
+      return
+    } catch (error) {
+      const problem = error as Problem
+      const type = problem.type ?? ""
+      if (problem.cart) cart = problem.cart
+      if (type.endsWith("cart-changed")) showError(problem.issues?.some((i) => BLOCKING_ISSUES.includes(i.code))
+        ? "Algo de tu carrito se agotó o ya no está disponible. Lo quitamos: revisá el total actualizado antes de pagar."
+        : "Tu carrito cambió (precio o existencias). Revisá el total actualizado antes de pagar.")
+      else if (type.endsWith("delivery-unavailable")) { quotedAddress = null; showError(problem.detail || "No entregamos en esa dirección. Elegí retiro o cambiá la dirección.") }
+      else if (type.endsWith("shipping-quote-required")) { quotedAddress = null; showError("La cotización de envío venció o cambió. Calculá el envío de nuevo.") }
+      else if (problem.errors?.some((e) => e.code === "origin_not_allowed")) {
+        showError(location.protocol !== "https:"
+          ? "Para pagar, este sitio tiene que abrirse con https://. En local seguí la guía «Checkout en local» del README."
+          : "Este dominio todavía no está verificado en Ali para cobrar. Quien administra la tienda tiene que verificarlo en Ali → Integraciones.")
+      } else if (problem.errors?.length) { showError("Revisá los datos marcados."); markErrors(problem.errors) }
+      else showError(problemMessage(problem))
+    } finally {
+      busy = false
+      payBtn.classList.remove("loading")
+      render()
+    }
+  })
+
+  async function init() {
+    try {
+      cart = await getCart()
+    } catch (problem) {
+      $("[data-loading]")!.hidden = true
+      app.hidden = false
+      showError(problemMessage(problem as Problem))
+      return
+    }
+    $("[data-loading]")!.hidden = true
+    if (!cart || cart.lines.length === 0) { $("[data-empty]")!.hidden = false; return }
+    app.hidden = false
+    const only = app.dataset.onlyMode
+    const radio = form.querySelector<HTMLInputElement>(`input[name="mode"][value="${cart.fulfillment_mode}"]`)
+    if (radio && radio.type === "radio") radio.checked = true
+    syncModeUI()
+    // Si el carrito quedó en un modo que la tienda ya no ofrece (o en el otro), lo alineamos con el servidor.
+    if ((only && cart.fulfillment_mode !== only) || cart.fulfillment_mode !== mode()) {
+      try { cart = await setFulfillment(mode()) } catch (problem) { showError(problemMessage(problem as Problem)) }
+    }
+    render()
+  }
+  init()
+</script>
