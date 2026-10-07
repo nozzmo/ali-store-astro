@@ -303,7 +303,8 @@ const methods = store.payment_methods
     try {
       const result = await checkout(payload, idempotencyKey(body))
       rememberOrder(result.order.id, result.order_token)
-      forgetCart()
+      // Un enlace de pago todavía puede rechazarse: conservá el carrito para reintentar.
+      if (!result.checkout_url) forgetCart()
       sessionStorage.removeItem("ali.idem")
       location.assign(result.checkout_url || `/pedido/${result.order.id}`)
       return
