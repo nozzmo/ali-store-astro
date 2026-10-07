@@ -168,7 +168,20 @@ export function forgetCart() { writeRef(null); setCount(0) }
 export function rememberOrder(id: string, token: string) {
   try {
     localStorage.setItem(`ali.order.${id}`, token)
+    const ref = readRef()
+    if (ref) localStorage.setItem(`ali.order.cart.${id}`, JSON.stringify(ref))
     localStorage.setItem("ali.order.last", id)
+  } catch {}
+}
+
+/** Sólo el pedido confirmado consume SU carrito; un pedido viejo no borra otro carrito. */
+export function completeOrderCart(id: string, status: string) {
+  if (!["confirmed", "fulfilled"].includes(status)) return
+  try {
+    const saved = localStorage.getItem(`ali.order.cart.${id}`)
+    const ref = readRef()
+    if (saved && ref && saved === JSON.stringify(ref)) forgetCart()
+    localStorage.removeItem(`ali.order.cart.${id}`)
   } catch {}
 }
 
