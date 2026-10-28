@@ -47,7 +47,7 @@ const number = id.replace(/-/g, "").slice(0, 6).toUpperCase()
 </Base>
 
 <script>
-  import { api, esc, forgetCart, orderToken, problemMessage, type Problem } from "../../scripts/store"
+  import { api, completeOrderCart, esc, orderToken, problemMessage, type Problem } from "../../scripts/store"
   import { money, orderStatus } from "../../lib/format"
 
   interface OrderLine { name: string; amount: string; currency: string; quantity: number; kind: string; total_display?: string }
@@ -70,7 +70,7 @@ const number = id.replace(/-/g, "").slice(0, 6).toUpperCase()
     }
     try {
       const o = await api<Order>(`/orders/${id}`, { headers: { "Ali-Order-Token": token } })
-      forgetCart()
+      completeOrderCart(o.id, o.status)
       const s = orderStatus(o.status)
       const pill = $("[data-status]")
       pill.textContent = s.label

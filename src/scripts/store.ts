@@ -168,7 +168,41 @@ export function forgetCart() { writeRef(null); setCount(0) }
 export function rememberOrder(id: string, token: string) {
   try {
     localStorage.setItem(`ali.order.${id}`, token)
+    const ref = readRef()
+    if (ref) localStorage.setItem(`ali.order.cart.${id}`, JSON.stringify(ref))
     localStorage.setItem("ali.order.last", id)
+    dropOtherCartSnapshots(id)
+  } catch {}
+}
+
+/**
+ * Sólo un carrito vive a la vez, así que la foto de cualquier pedido anterior
+ * ya no puede coincidir con él. El comprador que abandona el enlace de pago
+ * nunca vuelve a /pedido/:id, así que sin esta poda su foto quedaría para
+ * siempre: una por intento.
+ */
+function dropOtherCartSnapshots(keep: string) {
+  const stale: string[] = []
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i)
+    if (key?.startsWith("ali.order.cart.") && key !== `ali.order.cart.${keep}`) stale.push(key)
+  }
+  for (const key of stale) localStorage.removeItem(key)
+}
+
+/** Un pedido vivo todavía puede cobrarse; sólo `pending` conserva su rastro. */
+const SETTLED = ["confirmed", "fulfilled", "cancelled"]
+/** El carrito se consume al cobrar; `cancelled` lo deja intacto para reintentar. */
+const PAID = ["confirmed", "fulfilled"]
+
+/** Sólo el pedido pagado consume SU carrito; un pedido viejo no borra otro carrito. */
+export function completeOrderCart(id: string, status: string) {
+  if (!SETTLED.includes(status)) return
+  try {
+    const saved = localStorage.getItem(`ali.order.cart.${id}`)
+    const ref = readRef()
+    if (PAID.includes(status) && saved && ref && saved === JSON.stringify(ref)) forgetCart()
+    localStorage.removeItem(`ali.order.cart.${id}`)
   } catch {}
 }
 

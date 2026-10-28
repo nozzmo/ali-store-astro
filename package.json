@@ -3,11 +3,12 @@
   "private": true,
   "version": "2.0.0",
   "type": "module",
-  "description": "Tienda en l\u00ednea gen\u00e9rica sobre la Store API de Ali (Astro SSR).",
+  "description": "Tienda en línea genérica sobre la Store API de Ali (Astro SSR).",
   "engines": {
     "node": ">=22.12"
   },
   "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test \"test/**/*.test.mjs\"",
     "dev": "astro dev",
     "build": "astro check && astro build",
     "check": "astro check",
