@@ -9,7 +9,7 @@ if (shell instanceof Response) return shell
 // Modo catálogo: no hay carrito ni checkout.
 if (shell.catalogOnly) return Astro.redirect("/", 302)
 noStore(Astro)
-const { store } = shell
+const { store, contactUrl } = shell
 const { pickup, delivery } = store.fulfillment
 const both = pickup.enabled && delivery.enabled
 const onlyMode = !both ? (delivery.enabled ? "delivery" : "pickup") : null
@@ -19,6 +19,8 @@ const methods = store.payment_methods
   <section class="tight">
     <div class="wrap">
       <h1>Finalizar compra</h1>
+      <div data-cart-notice data-contact={contactUrl ?? undefined} aria-live="polite"></div>
+      <div class="notice warn recover" data-recover-error hidden role="alert"><Icon name="info" /><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></div>
       <p class="notice warn" data-cancelled hidden><Icon name="info" /><span>El pago no se completó. Tu carrito sigue guardado: revisá los datos e intentá de nuevo.</span></p>
       {!store.checkout_enabled && <p class="notice warn"><Icon name="info" /><span>Esta tienda todavía no tiene un método de pago activo. Podés armar tu carrito, pero no completar el pedido.</span></p>}
 
@@ -113,8 +115,8 @@ const methods = store.payment_methods
 </Base>
 
 <script>
-  import { checkout, esc, forgetCart, getCart, problemMessage, quoteShipping, rememberOrder, setFulfillment, type Cart, type Problem } from "../scripts/store"
-  import { BLOCKING_ISSUES, issueMessage, money } from "../lib/format"
+  import { cartNotice, cartNoticeHtml, checkout, dismissCartNotice, esc, forgetCart, getCart, paymentCancelledVisible, problemMessage, quoteShipping, recoverMessage, rememberOrder, replicable, replicateCart, setFulfillment, type Cart, type Problem } from "../scripts/store"
+  import { BLOCKING_ISSUES, issueMessage, issueTone, money } from "../lib/format"
 
   const app = document.querySelector<HTMLElement>("[data-checkout-app]")!
   const form = app.querySelector<HTMLFormElement>("[data-form]")!
@@ -134,8 +136,6 @@ const methods = store.payment_methods
   let quotedAddress: string | null = null
   let busy = false
 
-  if (new URLSearchParams(location.search).get("pago") === "cancelado") $("[data-cancelled]")!.hidden = false
-
   const mode = (): "pickup" | "delivery" => (form.querySelector<HTMLInputElement>('input[name="mode"]:checked') ?? form.querySelector<HTMLInputElement>('input[name="mode"][type="hidden"]'))?.value as "pickup" | "delivery" ?? "pickup"
   const currentAddress = () => (address?.value ?? "").trim().replace(/\s+/g, " ")
   const quoteReady = () => cart !== null && mode() === "delivery" && quotedAddress === currentAddress() && ["priced", "coordinate"].includes(cart.shipping_status)
@@ -148,7 +148,22 @@ const methods = store.payment_methods
 
   // El resumen se dibuja SIEMPRE desde el último carrito que devolvió Ali:
   // al cargar, al cambiar retiro/envío y después de cada cotización. Nunca se suma en el navegador.
+  const noticeEl = $("[data-cart-notice]")!
+  noticeEl.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest("[data-cart-notice-close]")) return
+    dismissCartNotice()
+    noticeEl.innerHTML = ""
+  })
+  // Al volver por cancel_url: si hay carrito replicado, su banner ES el aviso; el rojo «El pago no se completó» no se suma.
+  const cancelledEl = $("[data-cancelled]")!
+  const renderNotice = () => {
+    const notice = cartNotice(cart)
+    noticeEl.innerHTML = cartNoticeHtml(notice, noticeEl.dataset.contact)
+    cancelledEl.hidden = !paymentCancelledVisible(location.search, notice)
+  }
+
   function render() {
+    renderNotice()
     if (!cart) return
     const c = cart
     const cur = c.totals.currency
@@ -156,7 +171,7 @@ const methods = store.payment_methods
       <div class="sline">
         <span class="thumb">${l.image_url ? `<img src="${esc(l.image_url)}" alt="" loading="lazy">` : photo}<span class="qbadge">${l.quantity}</span></span>
         <span><b>${esc(l.product_name)}</b><small>${l.variant_name && l.variant_name !== l.product_name ? `${esc(l.variant_name)} · ` : ""}${l.quantity} × ${esc(money(l.unit_price, l.currency))}</small></span>
-      </div>`).join("") + c.issues.map((i) => `<p class="notice warn" style="margin:0"><span>${esc(issueMessage(i, cur))}${BLOCKING_ISSUES.includes(i.code) ? ` <a href="/carrito">Quitalo en el carrito</a> para poder pagar.` : ""}</span></p>`).join("")
+      </div>`).join("") + c.issues.map((i) => `<p class="notice${issueTone(i) === "warn" ? " warn" : ""}" style="margin:0"><span>${esc(issueMessage(i, cur))}${BLOCKING_ISSUES.includes(i.code) ? ` <a href="/carrito">Quitalo en el carrito</a> para poder pagar.` : ""}</span></p>`).join("")
     const unavailable = c.issues.some((i) => BLOCKING_ISSUES.includes(i.code))
     $("[data-subtotal]")!.textContent = money(c.totals.subtotal, cur)
 
@@ -312,7 +327,23 @@ const methods = store.payment_methods
       const problem = error as Problem
       const type = problem.type ?? ""
       if (problem.cart) cart = problem.cart
-      if (type.endsWith("cart-changed")) showError(problem.issues?.some((i) => BLOCKING_ISSUES.includes(i.code))
+      if (problem.status === 409 && replicable(problem)) {
+        // El checkout anterior quedó liberado (enlace vencido o carrito cambiado):
+        // mismo rescate que al cargar. Carrito nuevo con las mismas líneas y a revisar antes de pagar.
+        try {
+          const rescued = await withSummary(() => replicateCart())
+          if (!rescued) { location.assign("/carrito"); return }
+          cart = rescued
+          quotedAddress = null
+          if (quoteResult) quoteResult.innerHTML = ""
+          showError(rescued.lines.length === 0
+            ? "Los productos de tu carrito ya no están disponibles."
+            : "Actualizamos tu carrito. Revisá el total antes de volver a pagar.")
+        } catch (again) {
+          showError(problemMessage(again as Problem))
+        }
+      }
+      else if (type.endsWith("cart-changed")) showError(problem.issues?.some((i) => BLOCKING_ISSUES.includes(i.code))
         ? "Algo de tu carrito se agotó o ya no está disponible. Lo quitamos: revisá el total actualizado antes de pagar."
         : "Tu carrito cambió (precio o existencias). Revisá el total actualizado antes de pagar.")
       else if (type.endsWith("delivery-unavailable")) { quotedAddress = null; showError(problem.detail || "No entregamos en esa dirección. Elegí retiro o cambiá la dirección.") }
@@ -330,16 +361,21 @@ const methods = store.payment_methods
     }
   })
 
+  const recoverEl = $("[data-recover-error]")!
+  $("[data-recover-retry]")!.addEventListener("click", () => { recoverEl.hidden = true; $("[data-loading]")!.hidden = false; init() })
+
   async function init() {
     try {
       cart = await getCart()
     } catch (problem) {
+      // Sin carrito recuperado no se borra nada: error visible y Reintentar.
       $("[data-loading]")!.hidden = true
-      app.hidden = false
-      showError(problemMessage(problem as Problem))
+      $("[data-recover-text]")!.textContent = recoverMessage(problem as Problem)
+      recoverEl.hidden = false
       return
     }
     $("[data-loading]")!.hidden = true
+    renderNotice()
     if (!cart || cart.lines.length === 0) { $("[data-empty]")!.hidden = false; return }
     app.hidden = false
     const only = app.dataset.onlyMode
