@@ -2,6 +2,8 @@
 // (ali_pk_…), que el servidor deja en <body data-ali-pk>. El carrito vive en Ali;
 // acá sólo guardamos su id y su token.
 
+import { money } from "../lib/format.ts"
+
 export interface CartLine {
   id: string
   variant_id: string
@@ -75,8 +77,10 @@ export function problemMessage(problem: Problem): string {
   if (problem.status === 429) return `Hay mucho tráfico en este momento. Esperá ${problem.retry_after ? `${problem.retry_after} segundos` : "un momento"} y volvé a intentar.`
   if (problem.status === 0) return "No pudimos conectar con la tienda. Revisá tu conexión e intentá de nuevo."
   if (problem.type?.endsWith("origin-not-allowed")) return "Este sitio todavía no está autorizado para vender con esta tienda. Si sos quien administra el sitio, verificá el dominio en Ali (Integraciones)."
-  return problem.detail || "Algo salió mal. Intentá de nuevo."
+  return problem.detail || GENERIC_ERROR
 }
+const GENERIC_ERROR = "Algo salió mal. Intentá de nuevo."
+
 
 export async function api<T>(path: string, init: RequestInit & { cart?: boolean } = {}): Promise<T> {
   if (!API || !PK) throw { status: 0, detail: "La tienda no tiene configurada su llave publicable (ALI_PUBLISHABLE_KEY)." } as Problem
@@ -169,7 +173,13 @@ export async function replicateCart(): Promise<Cart | null> {
     writeRef({ id: result.id, token: result.cart_token })
     // La llave de idempotencia era del carrito viejo: con el nuevo, otro pedido.
     try { sessionStorage.removeItem("ali.idem") } catch {}
-    saveNotice({ kind: "replicated", cart: result.id, empty: result.cart.lines.length === 0 })
+    // Los cambios de precio sólo vienen en ESTA respuesta (el GET siguiente ya trae el precio nuevo):
+    // se guardan en el aviso para que el comprador los vea arriba hasta pagar o cerrarlo.
+    const currency = result.cart.totals.currency
+    const changes = result.cart.issues
+      .filter((i) => i.code === "price_changed" && i.from && i.to)
+      .map((i) => ({ variant_id: i.line?.variant_id ?? "", name: i.line?.product_name || "Un producto", from: i.from!, to: i.to!, currency }))
+    saveNotice({ kind: "replicated", cart: result.id, empty: result.cart.lines.length === 0, ...(changes.length ? { changes } : {}) })
   }
   setCount(result.cart.totals.item_count)
   return { ...result.cart, replicated: result.replicated }
@@ -190,8 +200,10 @@ function settlePaidCart() {
   saveNotice({ kind: "paid", order })
 }
 
+export interface PriceChange { variant_id: string; name: string; from: string; to: string; currency: string }
+
 export type CartNotice =
-  | { kind: "replicated"; cart: string; empty: boolean }
+  | { kind: "replicated"; cart: string; empty: boolean; changes?: PriceChange[] }
   | { kind: "paid"; order?: string }
 
 function saveNotice(notice: CartNotice) {
@@ -211,15 +223,46 @@ export function dismissCartNotice() {
   try { sessionStorage.removeItem(NOTICE_KEY) } catch {}
 }
 
-const orderNumber = (id: string) => id.replace(/-/g, "").slice(0, 6).toUpperCase()
+/**
+ * El «El pago no se completó» de volver por cancel_url sólo se muestra si no hay
+ * otro aviso del carrito: con carrito replicado (o pagado) sería un segundo mensaje que lo contradice.
+ */
+export const paymentCancelledVisible = (search: string, notice: CartNotice | null) =>
+  new URLSearchParams(search).get("pago") === "cancelado" && !notice
 
-/** La franja de arriba del carrito: título en negrita, el porqué y un botón para cerrarla. */
-export function cartNoticeHtml(notice: CartNotice | null): string {
+/** Variantes cuyo cambio de precio ya está en el banner (para no repetirlo abajo). */
+export const noticeChangedVariants = (notice: CartNotice | null) =>
+  notice?.kind === "replicated" ? (notice.changes ?? []).map((c) => c.variant_id) : []
+
+/** Error al recuperar el carrito: nunca se lee como carrito vacío; los productos siguen guardados. */
+export function recoverMessage(problem: Problem): string {
+  const base = "No pudimos cargar tus productos (siguen guardados)."
+  const why = problemMessage(problem)
+  return why === GENERIC_ERROR ? base : `${base} ${why}`
+}
+
+const orderNumber = (id: string) => id.replace(/-/g, "").slice(0, 6).toUpperCase()
+const safeHref = (url: string | null | undefined) => (url && /^(https?:|mailto:|tel:)/i.test(url) ? url : null)
+
+const ICON_INFO = '<svg class="icon" data-icon="info" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+const ICON_CHECK = '<svg class="icon" data-icon="check" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="m8 12.5 2.8 2.8L16.2 9.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+function priceChangesText(changes: PriceChange[]): string {
+  const list = changes.map((c) => `${c.name} ${money(c.from, c.currency)} → ${money(c.to, c.currency)}`).join(" · ")
+  return changes.length === 1 ? `Cambió 1 precio: ${list}` : `Cambiaron ${changes.length} precios: ${list}`
+}
+
+/**
+ * La franja de arriba del carrito: título en negrita, el porqué y un botón para cerrarla.
+ * `contact` es el chat de la tienda (ALI_CONTACT_URL o chat_url de Ali), para «¿Ya pagaste?».
+ */
+export function cartNoticeHtml(notice: CartNotice | null, contact?: string | null): string {
   if (!notice) return ""
-  const icon = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 11v5M12 8h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
   const close = '<button type="button" class="cart-notice-close" data-cart-notice-close aria-label="Cerrar aviso"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>'
-  let title: string, text: string, action = ""
+  let title: string, text: string, action = "", extra = "", tone = "", icon = ICON_INFO
   if (notice.kind === "paid") {
+    tone = "ok"
+    icon = ICON_CHECK
     title = notice.order ? `Tu pedido #${orderNumber(notice.order)} ya está pagado` : "Tu compra anterior ya se pagó"
     text = notice.order ? "No hace falta volver a pagar." : "Si querés comprar algo más, empezá un carrito nuevo."
     if (notice.order) action = `<a class="btn ghost small" href="/pedido/${esc(notice.order)}">Ver el pedido</a>`
@@ -229,9 +272,17 @@ export function cartNoticeHtml(notice: CartNotice | null): string {
     action = '<a class="btn ghost small" href="/">Ver productos</a>'
   } else {
     title = "Tu carrito sigue acá"
-    text = "Tu pago anterior no se completó, así que preparamos un carrito nuevo con tus productos. No uses el enlace de pago anterior. Si ya pagaste, escribile a la tienda antes de volver a pagar."
+    text = "Tu pago anterior no se completó. Te armamos un carrito nuevo con tus productos; no uses el enlace anterior."
+    const changes = notice.changes ?? []
+    // Un precio que sube es lo que el comprador tiene que ver antes de pagar: ámbar. Si sólo bajan, neutro.
+    if (changes.some((c) => Number(c.to) > Number(c.from))) tone = "warn"
+    if (changes.length) extra += `<p class="cart-notice-change">${esc(priceChangesText(changes))}</p>`
+    const href = safeHref(contact)
+    extra += href
+      ? `<p class="cart-notice-help">¿Ya pagaste? <a href="${esc(href)}" target="_blank" rel="noopener">Escribile a la tienda</a></p>`
+      : `<p class="cart-notice-help">¿Ya pagaste? Escribile a la tienda antes de volver a pagar.</p>`
   }
-  return `<div class="cart-notice" role="status">${icon}<div class="cart-notice-body"><strong>${esc(title)}</strong><p>${esc(text)}</p>${action}</div>${close}</div>`
+  return `<div class="${tone ? `cart-notice ${tone}` : "cart-notice"}" role="status">${icon}<div class="cart-notice-body"><strong>${esc(title)}</strong><p>${esc(text)}</p>${extra}${action}</div>${close}</div>`
 }
 
 async function ensureCart(): Promise<string> {

@@ -9,14 +9,14 @@ if (shell instanceof Response) return shell
 // Modo catálogo: no hay carrito ni checkout.
 if (shell.catalogOnly) return Astro.redirect("/", 302)
 noStore(Astro)
-const { store } = shell
+const { store, contactUrl } = shell
 ---
 <Base shell={shell} title="Tu carrito" path="/carrito" noindex>
   <section class="tight">
     <div class="wrap">
       <h1>Tu carrito</h1>
-      <div data-cart-notice aria-live="polite"></div>
-      <p class="notice warn" data-recover-error hidden role="alert"><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></p>
+      <div data-cart-notice data-contact={contactUrl ?? undefined} aria-live="polite"></div>
+      <div class="notice warn recover" data-recover-error hidden role="alert"><Icon name="info" /><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></div>
       <div class="two-col" data-cart-app>
         <div>
           <div data-issues></div>
@@ -42,8 +42,8 @@ const { store } = shell
 </Base>
 
 <script>
-  import { cartNotice, cartNoticeHtml, dismissCartNotice, dismissIssue, getCart, problemMessage, removeVariant, setQuantity, esc, visibleIssues, type Cart, type Problem } from "../scripts/store"
-  import { BLOCKING_ISSUES, issueMessage, money } from "../lib/format"
+  import { cartNotice, cartNoticeHtml, dismissCartNotice, dismissIssue, getCart, noticeChangedVariants, problemMessage, recoverMessage, removeVariant, setQuantity, esc, visibleIssues, type Cart, type Problem } from "../scripts/store"
+  import { BLOCKING_ISSUES, issueMessage, issueTone, money } from "../lib/format"
 
   const app = document.querySelector<HTMLElement>("[data-cart-app]")!
   const $ = <T extends HTMLElement = HTMLElement>(s: string) => app.querySelector<T>(s)!
@@ -53,11 +53,13 @@ const { store } = shell
 
   // Todo lo que se muestra sale del carrito que devuelve Ali; acá no se suma nada.
   function renderIssues(c: Cart) {
-    const issues = visibleIssues(c)
+    // El cambio de precio que ya está en el banner de arriba no se repite acá.
+    const inBanner = noticeChangedVariants(cartNotice(c))
+    const issues = visibleIssues(c).filter((i) => !(i.code === "price_changed" && i.line?.variant_id && inBanner.includes(i.line.variant_id)))
     issuesEl.innerHTML = issues.map((i) => {
       const blocking = BLOCKING_ISSUES.includes(i.code)
       const remove = blocking && i.line?.variant_id ? `<button class="btn ghost small" type="button" data-issue-remove="${esc(i.line.variant_id)}">Quitar del carrito</button>` : ""
-      return `<div class="notice warn issue"><span>${esc(issueMessage(i, c.totals.currency))}${blocking ? " Quitalo para poder pagar." : ""}</span>${remove}</div>`
+      return `<div class="notice ${issueTone(i) === "warn" ? "warn " : ""}issue"><span>${esc(issueMessage(i, c.totals.currency))}${blocking ? " Quitalo para poder pagar." : ""}</span>${remove}</div>`
     }).join("")
     return issues.some((i) => BLOCKING_ISSUES.includes(i.code))
   }
@@ -71,7 +73,7 @@ const { store } = shell
   })
 
   function render() {
-    noticeEl.innerHTML = cartNoticeHtml(cartNotice(cart))
+    noticeEl.innerHTML = cartNoticeHtml(cartNotice(cart), noticeEl.dataset.contact)
     const blocked = cart ? renderIssues(cart) : false
     const empty = !cart || cart.lines.length === 0
     go.setAttribute("aria-disabled", String(empty || blocked))
@@ -159,13 +161,15 @@ const { store } = shell
   go.addEventListener("click", (event) => { if (go.hasAttribute("data-disabled")) event.preventDefault() })
 
   // Si no se pudo recuperar el carrito (red, 429, 5xx), no se borra nada: se muestra el error y se puede reintentar.
+  // Sin carrito no hay resumen: un «Q0.00» con el botón apagado se leería como carrito vacío.
   function load() {
     recoverEl.hidden = true
+    app.hidden = false
     getCart().then((c) => { cart = c; render() }).catch((problem) => {
       cart = null
-      render()
-      linesEl.innerHTML = ""
-      document.querySelector("[data-recover-text]")!.textContent = problemMessage(problem as Problem)
+      app.hidden = true
+      noticeEl.innerHTML = cartNoticeHtml(cartNotice(null), noticeEl.dataset.contact)
+      document.querySelector("[data-recover-text]")!.textContent = recoverMessage(problem as Problem)
       recoverEl.hidden = false
     })
   }

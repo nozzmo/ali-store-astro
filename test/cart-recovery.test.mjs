@@ -55,7 +55,7 @@ test('recovery replicate: carrito nuevo con las mismas líneas, ref nuevo, conta
   assert.equal(sessionStorage.getItem('ali.idem'), null, 'la llave de idempotencia del carrito viejo no se reusa')
   assert.deepEqual(store.cartNotice(result), { kind: 'replicated', cart: 'cart-new', empty: false })
   assert.match(store.cartNoticeHtml(store.cartNotice(result)), /Tu carrito sigue acá/)
-  assert.match(store.cartNoticeHtml(store.cartNotice(result)), /No uses el enlace de pago anterior/)
+  assert.match(store.cartNoticeHtml(store.cartNotice(result)), /no uses el enlace anterior/)
   assert.equal(requests.length, 0)
 })
 
@@ -191,4 +191,75 @@ test('addLine después de replicar agrega al carrito nuevo, con las líneas del 
   const result = await store.addLine('v9', 1)
   assert.equal(result.totals.item_count, 3)
   assert.equal(seen[2].token, 'tok-new')
+})
+
+// Devolución de QA usuario (2-nov): lo que ve el comprador al volver de un pago no completado.
+const replicatedWith = (issues) => [
+  { method: 'GET', path: '/carts/cart-old', status: 409, body: released },
+  { method: 'POST', path: '/carts/cart-old/replicate', status: 201, body: { id: 'cart-new', cart_token: 'tok-new', replicated: true, cart: { ...cart('cart-new', 3), issues } } },
+  { method: 'GET', path: '/carts/cart-new', status: 200, body: cart('cart-new', 3) },
+]
+const ceviche = (from, to) => ({ code: 'price_changed', line: { variant_id: 'v0', product_name: 'Ceviche clásico' }, from, to })
+
+test('punto 1: al volver por cancel_url con carrito replicado hay UN solo aviso', async () => {
+  start(replicatedWith([]))
+  const result = await store.getCart()
+  const notice = store.cartNotice(result)
+  assert.equal(notice.kind, 'replicated')
+  assert.equal(store.paymentCancelledVisible('?pago=cancelado', notice), false, 'el rojo «El pago no se completó» no se suma al banner')
+  assert.equal(store.paymentCancelledVisible('?pago=cancelado', { kind: 'paid' }), false)
+  assert.equal(store.paymentCancelledVisible('?pago=cancelado', null), true, 'sin carrito replicado el aviso de cancelado sigue')
+  assert.equal(store.paymentCancelledVisible('', null), false)
+})
+
+test('punto 2: el cambio de precio va en el banner de arriba y sigue ahí al recargar /carrito', async () => {
+  start(replicatedWith([ceviche('250.00', '220.00')]))
+  await store.getCart()
+  const reloaded = await store.getCart() // el GET siguiente ya no trae issues: el precio nuevo quedó en el carrito
+  assert.deepEqual(reloaded.issues, [])
+  const html = store.cartNoticeHtml(store.cartNotice(reloaded))
+  assert.match(html, /Cambió 1 precio: Ceviche clásico Q250\.00 → Q220\.00/)
+  assert.doesNotMatch(html, /cart-notice warn/, 'si el precio baja, el banner es neutro')
+  assert.deepEqual(store.noticeChangedVariants(store.cartNotice(reloaded)), ['v0'])
+})
+
+test('punto 2: si el precio SUBE el banner se marca en ámbar y lista cada cambio', async () => {
+  start(replicatedWith([ceviche('220.00', '250.00'), { code: 'price_changed', line: { variant_id: 'v1', product_name: 'Tostones' }, from: '95.00', to: '90.00' }]))
+  const result = await store.getCart()
+  const html = store.cartNoticeHtml(store.cartNotice(result))
+  assert.match(html, /class="cart-notice warn"/)
+  assert.match(html, /Cambiaron 2 precios: Ceviche clásico Q220\.00 → Q250\.00 · Tostones Q95\.00 → Q90\.00/)
+})
+
+test('punto 3: el error de recuperación dice que los productos siguen guardados, no «Algo salió mal»', () => {
+  for (const problem of [{ status: 503, code: 'x' }, { status: 0 }, { status: 429, retry_after: 5 }]) {
+    const text = store.recoverMessage(problem)
+    assert.match(text, /^No pudimos cargar tus productos \(siguen guardados\)\./)
+    assert.doesNotMatch(text, /Algo salió mal/)
+  }
+  assert.match(store.recoverMessage({ status: 0 }), /Revisá tu conexión/)
+})
+
+test('menor: banner corto y «Si ya pagaste» es un enlace a la tienda', async () => {
+  start(replicatedWith([]))
+  const notice = store.cartNotice(await store.getCart())
+  const html = store.cartNoticeHtml(notice, 'https://wa.me/50255550000')
+  assert.match(html, /Tu pago anterior no se completó\. Te armamos un carrito nuevo con tus productos; no uses el enlace anterior\./)
+  assert.match(html, /¿Ya pagaste\? <a href="https:\/\/wa\.me\/50255550000" target="_blank" rel="noopener">Escribile a la tienda<\/a>/)
+  assert.doesNotMatch(html, /antes de volver a pagar/)
+  assert.doesNotMatch(store.cartNoticeHtml(notice, 'javascript:alert(1)'), /javascript:/, 'sólo enlaces http(s), mailto o tel')
+  assert.match(store.cartNoticeHtml(notice, null), /¿Ya pagaste\? Escribile a la tienda antes de volver a pagar\./)
+})
+
+test('menor: el aviso de pagado usa tono de éxito con check, no el ícono gris de info', () => {
+  const html = store.cartNoticeHtml({ kind: 'paid', order: '0a1b2c3d-0000-0000-0000-000000000000' })
+  assert.match(html, /class="cart-notice ok"/)
+  assert.match(html, /data-icon="check"/)
+})
+
+test('menor: un precio que baja es aviso neutro; uno que sube o un agotado, advertencia', async () => {
+  const { issueTone } = await import('../src/lib/format.ts')
+  assert.equal(issueTone(ceviche('250.00', '220.00')), 'neutral')
+  assert.equal(issueTone(ceviche('220.00', '250.00')), 'warn')
+  assert.equal(issueTone({ code: 'out_of_stock' }), 'warn')
 })

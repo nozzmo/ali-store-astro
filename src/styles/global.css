@@ -378,3 +378,15 @@ details.extra .form-grid { padding-bottom: 16px; }
 .cart-notice-close { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; margin: -10px 0 -10px 0; border: 0; background: none; color: var(--muted); border-radius: var(--radius); cursor: pointer; }
 .cart-notice-close:hover { color: var(--ink); background: var(--bg); }
 .cart-notice-close .icon { width: 18px; height: 18px; }
+.cart-notice.ok { background: var(--ok-bg); border-color: color-mix(in srgb, var(--ok) 22%, transparent); }
+.cart-notice.ok > .icon { color: var(--ok); }
+.cart-notice.warn { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 22%, transparent); }
+.cart-notice.warn > .icon, .cart-notice.warn .cart-notice-change { color: var(--warn); }
+.cart-notice-body .cart-notice-change { color: var(--ink); font-weight: 600; }
+.cart-notice-body .cart-notice-help a { color: var(--ink); font-weight: 600; }
+
+/* Error al recuperar el carrito: texto e «Reintentar» en la misma línea (o el botón abajo en móvil). */
+.notice.recover { align-items: center; flex-wrap: wrap; }
+.notice.recover > span { flex: 1 1 240px; }
+.notice.recover > .btn { flex: none; }
+.summary .notice:not(.warn) { background: var(--bg); color: var(--ink); }

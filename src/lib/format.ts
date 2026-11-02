@@ -66,3 +66,9 @@ export function issueMessage(issue: { code?: string; line?: { product_name?: str
       return `${name}: revisá este producto antes de pagar.`
   }
 }
+
+/** Tono del aviso: un precio que BAJA es informativo; si sube, o algo se agotó, es advertencia. */
+export function issueTone(issue: { code?: string; from?: string | null; to?: string | null }): "neutral" | "warn" {
+  if (issue.code === "price_changed" && issue.from && issue.to && Number(issue.to) < Number(issue.from)) return "neutral"
+  return "warn"
+}

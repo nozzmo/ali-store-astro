@@ -9,7 +9,7 @@ if (shell instanceof Response) return shell
 // Modo catálogo: no hay carrito ni checkout.
 if (shell.catalogOnly) return Astro.redirect("/", 302)
 noStore(Astro)
-const { store } = shell
+const { store, contactUrl } = shell
 const { pickup, delivery } = store.fulfillment
 const both = pickup.enabled && delivery.enabled
 const onlyMode = !both ? (delivery.enabled ? "delivery" : "pickup") : null
@@ -19,8 +19,8 @@ const methods = store.payment_methods
   <section class="tight">
     <div class="wrap">
       <h1>Finalizar compra</h1>
-      <div data-cart-notice aria-live="polite"></div>
-      <p class="notice warn" data-recover-error hidden role="alert"><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></p>
+      <div data-cart-notice data-contact={contactUrl ?? undefined} aria-live="polite"></div>
+      <div class="notice warn recover" data-recover-error hidden role="alert"><Icon name="info" /><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></div>
       <p class="notice warn" data-cancelled hidden><Icon name="info" /><span>El pago no se completó. Tu carrito sigue guardado: revisá los datos e intentá de nuevo.</span></p>
       {!store.checkout_enabled && <p class="notice warn"><Icon name="info" /><span>Esta tienda todavía no tiene un método de pago activo. Podés armar tu carrito, pero no completar el pedido.</span></p>}
 
@@ -115,8 +115,8 @@ const methods = store.payment_methods
 </Base>
 
 <script>
-  import { cartNotice, cartNoticeHtml, checkout, dismissCartNotice, esc, forgetCart, getCart, problemMessage, quoteShipping, rememberOrder, replicable, replicateCart, setFulfillment, type Cart, type Problem } from "../scripts/store"
-  import { BLOCKING_ISSUES, issueMessage, money } from "../lib/format"
+  import { cartNotice, cartNoticeHtml, checkout, dismissCartNotice, esc, forgetCart, getCart, paymentCancelledVisible, problemMessage, quoteShipping, recoverMessage, rememberOrder, replicable, replicateCart, setFulfillment, type Cart, type Problem } from "../scripts/store"
+  import { BLOCKING_ISSUES, issueMessage, issueTone, money } from "../lib/format"
 
   const app = document.querySelector<HTMLElement>("[data-checkout-app]")!
   const form = app.querySelector<HTMLFormElement>("[data-form]")!
@@ -136,8 +136,6 @@ const methods = store.payment_methods
   let quotedAddress: string | null = null
   let busy = false
 
-  if (new URLSearchParams(location.search).get("pago") === "cancelado") $("[data-cancelled]")!.hidden = false
-
   const mode = (): "pickup" | "delivery" => (form.querySelector<HTMLInputElement>('input[name="mode"]:checked') ?? form.querySelector<HTMLInputElement>('input[name="mode"][type="hidden"]'))?.value as "pickup" | "delivery" ?? "pickup"
   const currentAddress = () => (address?.value ?? "").trim().replace(/\s+/g, " ")
   const quoteReady = () => cart !== null && mode() === "delivery" && quotedAddress === currentAddress() && ["priced", "coordinate"].includes(cart.shipping_status)
@@ -156,7 +154,13 @@ const methods = store.payment_methods
     dismissCartNotice()
     noticeEl.innerHTML = ""
   })
-  const renderNotice = () => { noticeEl.innerHTML = cartNoticeHtml(cartNotice(cart)) }
+  // Al volver por cancel_url: si hay carrito replicado, su banner ES el aviso; el rojo «El pago no se completó» no se suma.
+  const cancelledEl = $("[data-cancelled]")!
+  const renderNotice = () => {
+    const notice = cartNotice(cart)
+    noticeEl.innerHTML = cartNoticeHtml(notice, noticeEl.dataset.contact)
+    cancelledEl.hidden = !paymentCancelledVisible(location.search, notice)
+  }
 
   function render() {
     renderNotice()
@@ -167,7 +171,7 @@ const methods = store.payment_methods
       <div class="sline">
         <span class="thumb">${l.image_url ? `<img src="${esc(l.image_url)}" alt="" loading="lazy">` : photo}<span class="qbadge">${l.quantity}</span></span>
         <span><b>${esc(l.product_name)}</b><small>${l.variant_name && l.variant_name !== l.product_name ? `${esc(l.variant_name)} · ` : ""}${l.quantity} × ${esc(money(l.unit_price, l.currency))}</small></span>
-      </div>`).join("") + c.issues.map((i) => `<p class="notice warn" style="margin:0"><span>${esc(issueMessage(i, cur))}${BLOCKING_ISSUES.includes(i.code) ? ` <a href="/carrito">Quitalo en el carrito</a> para poder pagar.` : ""}</span></p>`).join("")
+      </div>`).join("") + c.issues.map((i) => `<p class="notice${issueTone(i) === "warn" ? " warn" : ""}" style="margin:0"><span>${esc(issueMessage(i, cur))}${BLOCKING_ISSUES.includes(i.code) ? ` <a href="/carrito">Quitalo en el carrito</a> para poder pagar.` : ""}</span></p>`).join("")
     const unavailable = c.issues.some((i) => BLOCKING_ISSUES.includes(i.code))
     $("[data-subtotal]")!.textContent = money(c.totals.subtotal, cur)
 
@@ -366,7 +370,7 @@ const methods = store.payment_methods
     } catch (problem) {
       // Sin carrito recuperado no se borra nada: error visible y Reintentar.
       $("[data-loading]")!.hidden = true
-      $("[data-recover-text]")!.textContent = problemMessage(problem as Problem)
+      $("[data-recover-text]")!.textContent = recoverMessage(problem as Problem)
       recoverEl.hidden = false
       return
     }
