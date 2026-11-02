@@ -237,6 +237,7 @@ export const noticeChangedVariants = (notice: CartNotice | null) =>
 /** Error al recuperar el carrito: nunca se lee como carrito vacío; los productos siguen guardados. */
 export function recoverMessage(problem: Problem): string {
   const base = "No pudimos cargar tus productos (siguen guardados)."
+  if (problem.status === 0) return `${base} Revisá tu conexión e intentá de nuevo.`
   const why = problemMessage(problem)
   return why === GENERIC_ERROR ? base : `${base} ${why}`
 }

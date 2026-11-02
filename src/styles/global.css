@@ -386,7 +386,12 @@ details.extra .form-grid { padding-bottom: 16px; }
 .cart-notice-body .cart-notice-help a { color: var(--ink); font-weight: 600; }
 
 /* Error al recuperar el carrito: texto e «Reintentar» en la misma línea (o el botón abajo en móvil). */
-.notice.recover { align-items: center; flex-wrap: wrap; }
-.notice.recover > span { flex: 1 1 240px; }
-.notice.recover > .btn { flex: none; }
+.notice.recover { display: grid; grid-template-columns: auto 1fr auto; align-items: center; column-gap: 10px; row-gap: 10px; }
+.notice.recover > .icon { margin-top: 0; }
+.notice.recover > .btn { white-space: nowrap; }
+@media (max-width: 600px) {
+  .notice.recover { grid-template-columns: auto 1fr; }
+  .notice.recover > .icon { align-self: start; margin-top: 3px; }
+  .notice.recover > .btn { grid-column: 2; justify-self: start; }
+}
 .summary .notice:not(.warn) { background: var(--bg); color: var(--ink); }

@@ -238,6 +238,7 @@ test('punto 3: el error de recuperación dice que los productos siguen guardados
     assert.doesNotMatch(text, /Algo salió mal/)
   }
   assert.match(store.recoverMessage({ status: 0 }), /Revisá tu conexión/)
+  assert.equal(store.recoverMessage({ status: 0 }).match(/No pudimos/g).length, 1, 'sin «No pudimos» repetido')
 })
 
 test('menor: banner corto y «Si ya pagaste» es un enlace a la tienda', async () => {
