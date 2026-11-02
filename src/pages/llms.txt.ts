@@ -34,6 +34,7 @@ ${products.slice(0, 500).map(line).join("\n")}
 - Store API de Ali — OpenAPI: ${api}/openapi.json
 - Guía para LLMs de la Store API: ${api}/llms.txt
 - Servidor MCP de la tienda: ${hub}/mcp (tarjeta: ${origin}/.well-known/mcp/server-card.json)
+- Si un carrito responde 409 con \`recovery: "replicate"\` (el pago anterior no se completó), POST ${api}/carts/{id}/replicate con su Ali-Cart-Token devuelve un carrito nuevo con las mismas líneas; con \`recovery: "new-cart"\` ya se pagó y no se copia.
 
 ## Optional
 

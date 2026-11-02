@@ -15,6 +15,8 @@ const { store } = shell
   <section class="tight">
     <div class="wrap">
       <h1>Tu carrito</h1>
+      <div data-cart-notice aria-live="polite"></div>
+      <p class="notice warn" data-recover-error hidden role="alert"><span data-recover-text></span><button class="btn ghost small" type="button" data-recover-retry>Reintentar</button></p>
       <div class="two-col" data-cart-app>
         <div>
           <div data-issues></div>
@@ -40,7 +42,7 @@ const { store } = shell
 </Base>
 
 <script>
-  import { dismissIssue, getCart, problemMessage, removeVariant, setQuantity, esc, visibleIssues, type Cart, type Problem } from "../scripts/store"
+  import { cartNotice, cartNoticeHtml, dismissCartNotice, dismissIssue, getCart, problemMessage, removeVariant, setQuantity, esc, visibleIssues, type Cart, type Problem } from "../scripts/store"
   import { BLOCKING_ISSUES, issueMessage, money } from "../lib/format"
 
   const app = document.querySelector<HTMLElement>("[data-cart-app]")!
@@ -60,7 +62,16 @@ const { store } = shell
     return issues.some((i) => BLOCKING_ISSUES.includes(i.code))
   }
 
+  const noticeEl = document.querySelector<HTMLElement>("[data-cart-notice]")!
+  const recoverEl = document.querySelector<HTMLElement>("[data-recover-error]")!
+  noticeEl.addEventListener("click", (event) => {
+    if (!(event.target as HTMLElement).closest("[data-cart-notice-close]")) return
+    dismissCartNotice()
+    noticeEl.innerHTML = ""
+  })
+
   function render() {
+    noticeEl.innerHTML = cartNoticeHtml(cartNotice(cart))
     const blocked = cart ? renderIssues(cart) : false
     const empty = !cart || cart.lines.length === 0
     go.setAttribute("aria-disabled", String(empty || blocked))
@@ -147,5 +158,17 @@ const { store } = shell
   })
   go.addEventListener("click", (event) => { if (go.hasAttribute("data-disabled")) event.preventDefault() })
 
-  getCart().then((c) => { cart = c; render() }).catch((problem) => { cart = null; render(); fail(problem) })
+  // Si no se pudo recuperar el carrito (red, 429, 5xx), no se borra nada: se muestra el error y se puede reintentar.
+  function load() {
+    recoverEl.hidden = true
+    getCart().then((c) => { cart = c; render() }).catch((problem) => {
+      cart = null
+      render()
+      linesEl.innerHTML = ""
+      document.querySelector("[data-recover-text]")!.textContent = problemMessage(problem as Problem)
+      recoverEl.hidden = false
+    })
+  }
+  document.querySelector("[data-recover-retry]")!.addEventListener("click", load)
+  load()
 </script>

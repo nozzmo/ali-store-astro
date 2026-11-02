@@ -113,6 +113,36 @@ negocio en Ali (`chat_url` de `/store`). Sin ninguno de los dos, no se muestra e
   agota con el checkout abierto, Ali responde `409 cart-changed` al pagar, corrige el
   carrito y el resumen se redibuja con el total nuevo.
 
+## Cuando el pago anterior no se completó (409 de checkout)
+
+Si el comprador abrió un enlace de pago externo y después el enlace venció o cambió el
+carrito, Ali deja ese carrito atado a su pedido cancelado (para revisar un pago tardío) y
+responde `409`. El cuerpo trae `recovery`, que dice qué hacer:
+
+| `recovery` | Qué hace el template |
+|---|---|
+| `replicate` | Llama a `POST /carts/:id/replicate`, guarda el carrito nuevo (mismas líneas, revalidadas) y muestra «Tu carrito sigue acá» arriba del carrito. |
+| `retry` | El checkout se está preparando: espera `retry_after` segundos y reintenta una vez. |
+| `new-cart` | El carrito ya se pagó: nunca se copia. Se olvida y, si el navegador conoce el pedido, se muestra con un enlace. |
+
+Si `replicate` falla (red, 429, 5xx) no se borra nada: se muestra el error con «Reintentar».
+Cualquier otro `409` muestra el `detail` de Ali; nunca un carrito vacío en silencio.
+
+Para una tienda propia, el mismo manejo en pocas líneas:
+
+```ts
+const res = await fetch(`${API}/carts/${cart.id}`, { headers })
+if (res.status === 409) {
+  const problem = await res.json()
+  if (problem.recovery === "replicate") {
+    const r = await fetch(`${API}/carts/${cart.id}/replicate`, { method: "POST", headers })
+    const body = await r.json() // 201 { id, cart_token, cart, replicated: true } · 200 { replicated: false, cart }
+    if (body.replicated) saveCart({ id: body.id, token: body.cart_token })
+    showCart(body.cart) // body.cart.issues: price_changed, reduced, out_of_stock, gone
+  }
+}
+```
+
 ## Qué hace cada página
 
 | Ruta | Qué muestra |

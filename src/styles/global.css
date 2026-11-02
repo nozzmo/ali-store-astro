@@ -367,3 +367,14 @@ details.extra .form-grid { padding-bottom: 16px; }
 .toast a { color: #fff; font-weight: 600; white-space: nowrap; padding: 8px 12px; border-radius: var(--radius); background: rgb(255 255 255 / .14); text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Aviso del carrito rescatado (o ya pagado): franja de ancho completo arriba de las líneas, no bloquea y se cierra. */
+.cart-notice { display: flex; align-items: flex-start; gap: 12px; padding: 14px 8px 14px 16px; margin: 0 0 24px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--line); color: var(--ink); font-size: .9rem; }
+.cart-notice > .icon { flex: none; width: 20px; height: 20px; margin-top: 1px; }
+.cart-notice-body { flex: 1 1 auto; min-width: 0; }
+.cart-notice-body strong { display: block; font-weight: 650; }
+.cart-notice-body p { margin: 4px 0 0; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+.cart-notice-body .btn { margin-top: 10px; background: var(--bg); }
+.cart-notice-close { flex: none; display: inline-grid; place-items: center; width: 44px; height: 44px; margin: -10px 0 -10px 0; border: 0; background: none; color: var(--muted); border-radius: var(--radius); cursor: pointer; }
+.cart-notice-close:hover { color: var(--ink); background: var(--bg); }
+.cart-notice-close .icon { width: 18px; height: 18px; }
